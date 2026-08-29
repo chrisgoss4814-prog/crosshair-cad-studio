@@ -1,24 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { CadApp } from "@/components/cad/CadApp";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
-  component: Index,
+  ssr: false,
+  head: () => ({
+    meta: [
+      { title: "Vector Bay — First-Person 3D CAD Sketchpad" },
+      {
+        name: "description",
+        content:
+          "Fly through 3D space with dual joysticks, aim a precision crosshair, and place solids on an X/Y/Z grid.",
+      },
+      { property: "og:title", content: "Vector Bay — First-Person 3D CAD Sketchpad" },
+      {
+        property: "og:description",
+        content:
+          "Fly through 3D space with dual joysticks, aim a precision crosshair, and place solids on an X/Y/Z grid.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
+  component: CadApp,
 });
-
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
-function Index() {
-  return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
-  );
-}
