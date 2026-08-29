@@ -258,16 +258,15 @@ export function CadApp() {
 
   const onMeasurePick = useCallback((p: THREE.Vector3) => {
     const t: [number, number, number] = [p.x, p.y, p.z];
-    setMeasureA((a) => {
-      if (!a) return t;
-      setMeasureB(t);
-      return a;
-    });
-    setMeasureB((b) => {
-      // second tap when both already set -> restart
-      return b ? null : b;
-    });
+    measureRef.current = measureRef.current.b
+      ? { a: t, b: null }
+      : measureRef.current.a
+        ? { a: measureRef.current.a, b: t }
+        : { a: t, b: null };
+    setMeasureA(measureRef.current.a);
+    setMeasureB(measureRef.current.b);
   }, []);
+
 
   const resetMeasure = () => {
     setMeasureA(null);
