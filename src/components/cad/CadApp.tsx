@@ -120,6 +120,10 @@ export function CadApp() {
   const [panel, setPanel] = useState<"none" | "style" | "scenes">("none");
   const [measureA, setMeasureA] = useState<[number, number, number] | null>(null);
   const [measureB, setMeasureB] = useState<[number, number, number] | null>(null);
+  const measureRef = useRef<{
+    a: [number, number, number] | null;
+    b: [number, number, number] | null;
+  }>({ a: null, b: null });
   const [sceneName, setSceneName] = useState("");
   const [scenes, setScenes] = useState<string[]>([]);
   const [rect, setRect] = useState<null | {
