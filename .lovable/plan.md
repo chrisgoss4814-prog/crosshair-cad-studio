@@ -14,6 +14,7 @@ Turn the sketchpad into a real CAD building tool:
 9. **Measure tool** — tap two points, read the distance between them.
 10. **3-way camera** — switch First-person fly / Orbit / Top-down.
 11. **Save & reload scenes** — local-only (localStorage); named scenes + auto-save.
+12. **Screen-locked quadrant axes with scrolling numbers** — axes always cross at screen center; the numeric labels slide as you move.
 
 ---
 
@@ -138,7 +139,38 @@ Add a **View** toggle (top-left of HUD) cycling **Fly** (today's twin-stick firs
 
 ---
 
+## 12. Screen-locked quadrant axes with scrolling numbers
+
+Replace the free-floating crosshair concept with a **fixed screen-space axis HUD**:
+
+- A vertical line and a horizontal line always drawn through the exact **center of the screen**, splitting the view into four quadrants. They never move — they are the reference frame.
+- **The numbers move, not the lines.** Tick labels run along each axis line and reflect the current world coordinate of the center point:
+  - Move **left** → X labels slide right (the world scrolls past a fixed reticle).
+  - Move **up/down** → Y labels slide along the vertical axis.
+  - Move **forward/back** → Z labels update (shown on a third short depth axis, drawn as a diagonal or as a dedicated Z strip near the center, since Z is the into-screen direction).
+- The center intersection displays the live `X / Y / Z` value of the placement point — this replaces the separate top telemetry chip.
+- **Placement happens at the center intersection.** The Add button places at exactly that point, so no separate crosshair is needed; the existing crosshair SVG is retired in favor of a thin center reticle mark on the axis HUD.
+
+**Tick behavior**
+- Tick spacing is derived from the current snap/step setting (0.5m default; tightens or loosens with the decimal-step selector) so labels stay readable at any zoom/scale.
+- Labels are rendered as fractional offsets: as the center's world X passes each tick, labels shift continuously rather than snapping, giving a smooth "ruler scrolling under a fixed needle" feel.
+- Axis colors follow the existing tokens: X red, Y green, Z blue.
+
+**Changes**
+- `src/components/cad/AxisHud.tsx` (new): a DOM/SVG overlay drawing the two full-screen lines, the center reticle, and the scrolling tick labels for X, Y, Z. It reads the live center-point coordinate published each frame by the rig.
+- `state.ts`: the existing `crosshair` vector becomes the canonical "center point"; add a lightweight subscription (a `useSyncExternalStore`-style tick or throttled state push) so the HUD re-renders at a smooth but capped rate without re-rendering the canvas.
+- `Crosshair.tsx`: retired; its center-dot mark folds into `AxisHud`.
+- `Scene.tsx`: the in-world colored `Axes` lines stay (they still show world orientation in 3D) but the placement reticle is now purely the screen-center HUD. The 3D grid remains as ground reference.
+- `CadApp.tsx`: swap `<Crosshair />` for `<AxisHud />`; remove the now-redundant top telemetry chip (the center readout replaces it).
+
+**Interaction with the 3-way camera**
+- Fly and Orbit: center point = forward raycast at the current depth (as today).
+- Top-down: center point = ground-plane intersection under screen center; the Z axis labels track the vertical layer instead.
+
+---
+
 ## SSR / build safety
+
 - All localStorage access stays in `useEffect` (route is already `ssr: false`).
 - No new server functions; pure client state + localStorage.
 - Raycasting, drag, and ortho camera all run browser-only inside the client-only route.
