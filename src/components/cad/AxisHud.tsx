@@ -80,17 +80,6 @@ export function AxisHud({ step }: { step: number }) {
             const major = Math.abs(Math.round(v / unit) % 5) === 0;
             return (
               <g key={`x${v}`} transform={`translate(${dx}, 0)`}>
-                <line
-                  x1="50%"
-                  x2="50%"
-                  y1="50%"
-                  y2="50%"
-                  transform={`translate(0, ${major ? -7 : -4})`}
-                  stroke="currentColor"
-                  strokeOpacity="0.75"
-                  strokeWidth="1"
-                  style={{ transform: `translateY(${major ? -7 : -4}px)` }}
-                />
                 <rect
                   x="50%"
                   y="50%"

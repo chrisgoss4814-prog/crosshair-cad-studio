@@ -11,7 +11,6 @@ import {
   controls,
   DEFAULT_MATERIAL,
   makeObject,
-  roundTo,
   sceneRefs,
   SNAP,
   STEPS,
@@ -273,6 +272,7 @@ export function CadApp() {
 
 
   const resetMeasure = () => {
+    measureRef.current = { a: null, b: null };
     setMeasureA(null);
     setMeasureB(null);
   };
@@ -760,6 +760,3 @@ export function CadApp() {
     </main>
   );
 }
-
-// keep tree-shaking honest for helpers used only in dev builds
-void roundTo;
