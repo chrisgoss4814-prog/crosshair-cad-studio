@@ -14,6 +14,7 @@ Turn the sketchpad into a real CAD building tool:
 9. **Measure tool** — tap two points, read the distance between them.
 10. **3-way camera** — switch First-person fly / Orbit / Top-down.
 11. **Save & reload scenes** — local-only (localStorage); named scenes + auto-save.
+12. **Screen-locked quadrant axes with scrolling numbers** — axes always cross at screen center; the numeric labels slide as you move.
 
 ---
 
