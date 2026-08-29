@@ -59,7 +59,17 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-panel: var(--panel);
+  --color-grid-line: var(--grid-line);
+  --color-crosshair: var(--crosshair);
+  --color-axis-x: var(--axis-x);
+  --color-axis-y: var(--axis-y);
+  --color-axis-z: var(--axis-z);
+  --shadow-hud: 0 6px 24px oklch(0 0 0 / 0.45);
+  --shadow-glow: 0 0 22px oklch(0.8 0.13 220 / 0.35);
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 }
+
 
 :root {
   --radius: 0.625rem;
