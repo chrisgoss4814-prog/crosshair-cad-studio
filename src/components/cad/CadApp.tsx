@@ -486,6 +486,12 @@ export function CadApp() {
   );
 
   const place = () => {
+    // Confirm mode: the first tap arms, the second commits.
+    if (confirmPlace && !armed) {
+      setArmed(true);
+      return;
+    }
+    setArmed(false);
     const p = centerPoint;
     const next = makeObject(kind, [p.x, p.y, p.z], size, material, {
       scale: [...stretch] as [number, number, number],
@@ -501,7 +507,54 @@ export function CadApp() {
       return;
     }
     setObjects((prev) => [...prev, next]);
+    setLastPlacedId(next.id);
+    const spec: RecentSpec = {
+      kind,
+      size,
+      stretch: [...stretch] as [number, number, number],
+      sides,
+      curve,
+      extrude,
+      bend,
+      bendAxis,
+      taper,
+    };
+    setRecent((prev) => {
+      const key = JSON.stringify(spec);
+      return [spec, ...prev.filter((r) => JSON.stringify(r) !== key)].slice(0, 4);
+    });
     clearTap();
+  };
+
+  const applyRecent = (r: RecentSpec) => {
+    setKind(r.kind);
+    setSize(r.size);
+    setStretch([...r.stretch] as [number, number, number]);
+    setLockStretch(false);
+    setSides(r.sides);
+    setCurve(r.curve);
+    setExtrude(r.extrude);
+    setBend(r.bend);
+    setBendAxis(r.bendAxis);
+    setTaper(r.taper);
+  };
+
+  /** Place another copy of the last object, offset beside it like a brick. */
+  const repeat = () => {
+    const last =
+      objects.find((o) => o.id === lastPlacedId) ?? objects[objects.length - 1];
+    if (!last) return;
+    const s = worldBoxOf(last).getSize(new THREE.Vector3());
+    const copy: PlacedObject = {
+      ...cloneObject(last, 0),
+      position: [last.position[0] + s.x, last.position[1], last.position[2]],
+    };
+    if (wouldCollide(copy, [])) {
+      toast.error("Blocked — that spot overlaps another object");
+      return;
+    }
+    setObjects((prev) => [...prev, copy]);
+    setLastPlacedId(copy.id);
   };
 
   const undo = () => setObjects((prev) => prev.slice(0, -1));
