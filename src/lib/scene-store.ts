@@ -1,4 +1,4 @@
-import type { PlacedObject } from "@/components/cad/state";
+import { hydrateObject, type PlacedObject } from "@/components/cad/state";
 
 const PREFIX = "vectorbay:scene:";
 const AUTO = "vectorbay:auto";
@@ -44,6 +44,7 @@ export function autoSave(objects: PlacedObject[]) {
 export function loadAuto(): PlacedObject[] | null {
   return safe(() => {
     const raw = localStorage.getItem(AUTO);
-    return raw ? (JSON.parse(raw) as PlacedObject[]) : null;
+    if (!raw) return null;
+    return (JSON.parse(raw) as PlacedObject[]).map((o) => hydrateObject(o));
   }, null);
 }

@@ -12,19 +12,22 @@ import {
   OrthographicCamera,
 } from "@react-three/drei";
 import * as THREE from "three";
+import { buildGeometry, type GeometrySpec } from "./geometry";
 import {
   centerPoint,
   computeCenterPoint,
   controls,
+  geometryOf,
   meshRegistry,
   publishCenter,
   roundTo,
   sceneRefs,
   SNAP,
+  speedFactor,
+  tapTarget,
   type DragPlaneMode,
   type Material,
   type PlacedObject,
-  type ShapeKind,
   type ToolMode,
   type ViewMode,
 } from "./state";
@@ -33,19 +36,6 @@ const MOVE_SPEED = 7;
 const LOOK_SPEED = 1.9;
 const LIFT_SPEED = 4;
 const PITCH_LIMIT = Math.PI / 2 - 0.05;
-
-function Geometry({ kind, size }: { kind: ShapeKind; size: number }) {
-  switch (kind) {
-    case "sphere":
-      return <sphereGeometry args={[size / 2, 28, 20]} />;
-    case "cylinder":
-      return <cylinderGeometry args={[size / 2, size / 2, size, 28]} />;
-    case "cone":
-      return <coneGeometry args={[size / 2, size, 28]} />;
-    default:
-      return <boxGeometry args={[size, size, size]} />;
-  }
-}
 
 /** First-person twin-stick rig. */
 function FlyRig() {
@@ -57,9 +47,10 @@ function FlyRig() {
 
   useFrame((_, raw) => {
     const dt = Math.min(raw, 0.05);
-    yaw.current -= controls.look.x * LOOK_SPEED * dt;
+    const k = speedFactor();
+    yaw.current -= controls.look.x * LOOK_SPEED * k * dt;
     pitch.current = THREE.MathUtils.clamp(
-      pitch.current - controls.look.y * LOOK_SPEED * dt,
+      pitch.current - controls.look.y * LOOK_SPEED * k * dt,
       -PITCH_LIMIT,
       PITCH_LIMIT,
     );
@@ -75,9 +66,9 @@ function FlyRig() {
       -Math.sin(yaw.current),
     );
 
-    pos.current.addScaledVector(forward, -controls.move.y * MOVE_SPEED * dt);
-    pos.current.addScaledVector(right, controls.move.x * MOVE_SPEED * dt);
-    pos.current.y += controls.lift * LIFT_SPEED * dt;
+    pos.current.addScaledVector(forward, -controls.move.y * MOVE_SPEED * k * dt);
+    pos.current.addScaledVector(right, controls.move.x * MOVE_SPEED * k * dt);
+    pos.current.y += controls.lift * LIFT_SPEED * k * dt;
 
     euler.set(pitch.current, yaw.current, 0);
     camera.quaternion.setFromEuler(euler);
@@ -93,11 +84,13 @@ function CenterProbe({
   size,
   snap,
   grid,
+  shapeSnap,
 }: {
   depth: number;
   size: number;
   snap: boolean;
   grid: number;
+  shapeSnap: boolean;
 }) {
   const { camera, size: viewport } = useThree();
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
@@ -108,11 +101,27 @@ function CenterProbe({
     sceneRefs.width = viewport.width;
     sceneRefs.height = viewport.height;
 
+    if (tapTarget.point) {
+      centerPoint.copy(tapTarget.point);
+      accum.current += delta;
+      if (accum.current >= 1 / 30) {
+        accum.current = 0;
+        publishCenter({
+          x: centerPoint.x,
+          y: centerPoint.y,
+          z: centerPoint.z,
+          onSurface: true,
+        });
+      }
+      return;
+    }
+
     const { point, onSurface } = computeCenterPoint(camera, raycaster, {
       depth,
       size,
       snap,
       grid,
+      shapeSnap,
     });
     centerPoint.copy(point);
 
@@ -131,15 +140,23 @@ function CenterProbe({
   return null;
 }
 
-function Ghost({ kind, size, material }: { kind: ShapeKind; size: number; material: Material }) {
+function Ghost({
+  spec,
+  scale,
+  material,
+}: {
+  spec: GeometrySpec;
+  scale: [number, number, number];
+  material: Material;
+}) {
   const ref = useRef<THREE.Group>(null);
+  const geo = useMemo(() => buildGeometry(spec), [spec]);
   useFrame(() => {
     ref.current?.position.copy(centerPoint);
   });
   return (
     <group ref={ref}>
-      <mesh>
-        <Geometry kind={kind} size={size} />
+      <mesh geometry={geo} scale={scale}>
         <meshBasicMaterial
           color={material.color}
           wireframe
@@ -161,6 +178,8 @@ function ObjectMesh({
   onSelect,
   onMove,
   onMeasurePick,
+  onTapTarget,
+  onCutPick,
 }: {
   o: PlacedObject;
   selected: boolean;
@@ -171,6 +190,8 @@ function ObjectMesh({
   onSelect: (id: string, additive: boolean) => void;
   onMove: (id: string, pos: [number, number, number]) => void;
   onMeasurePick: (p: THREE.Vector3) => void;
+  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3) => void;
+  onCutPick: (id: string, p: THREE.Vector3) => void;
 }) {
   const ref = useRef<THREE.Mesh>(null);
   const { camera } = useThree();
@@ -178,6 +199,8 @@ function ObjectMesh({
   const plane = useRef(new THREE.Plane());
   const offset = useRef(new THREE.Vector3());
   const hitPoint = useRef(new THREE.Vector3());
+
+  const geometry = useMemo(() => geometryOf(o), [o]);
 
   useEffect(() => {
     const mesh = ref.current;
@@ -192,6 +215,19 @@ function ObjectMesh({
     if (tool === "measure") {
       e.stopPropagation();
       onMeasurePick(e.point.clone());
+      return;
+    }
+    if (tool === "cut") {
+      e.stopPropagation();
+      onCutPick(o.id, e.point.clone());
+      return;
+    }
+    if (tool === "place") {
+      e.stopPropagation();
+      const n = e.face
+        ? e.face.normal.clone().transformDirection(e.object.matrixWorld).normalize()
+        : new THREE.Vector3(0, 1, 0);
+      onTapTarget(e.point.clone(), n);
       return;
     }
     if (tool !== "edit") return;
@@ -238,8 +274,10 @@ function ObjectMesh({
   return (
     <mesh
       ref={ref}
+      geometry={geometry}
       position={o.position}
       rotation={o.rotation}
+      scale={o.scale ?? [o.size, o.size, o.size]}
       castShadow
       receiveShadow
       onPointerDown={onPointerDown}
@@ -247,11 +285,11 @@ function ObjectMesh({
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
     >
-      <Geometry kind={o.kind} size={o.size} />
       <meshStandardMaterial
         color={o.color}
         metalness={o.metalness}
         roughness={o.roughness}
+        side={THREE.DoubleSide}
       />
       {selected && <Edges scale={1.04} color="#4fd1ff" />}
     </mesh>
@@ -293,24 +331,40 @@ function MeasureOverlay({
   );
 }
 
+/** Small marker showing the sticky tap target. */
+function TapMarker({ point }: { point: [number, number, number] | null }) {
+  if (!point) return null;
+  return (
+    <mesh position={point}>
+      <sphereGeometry args={[0.07, 12, 12]} />
+      <meshBasicMaterial color="#4fd1ff" />
+    </mesh>
+  );
+}
+
 export type SceneProps = {
   objects: PlacedObject[];
   view: ViewMode;
   tool: ToolMode;
-  kind: ShapeKind;
+  ghostSpec: GeometrySpec;
+  ghostScale: [number, number, number];
   size: number;
   depth: number;
   snap: boolean;
+  shapeSnap: boolean;
   grid: number;
   material: Material;
   dragPlane: DragPlaneMode;
   selectedIds: string[];
   measureA: [number, number, number] | null;
   measureB: [number, number, number] | null;
+  tapPoint: [number, number, number] | null;
   onSelect: (id: string, additive: boolean) => void;
   onSelectNone: () => void;
   onMove: (id: string, pos: [number, number, number]) => void;
   onMeasurePick: (p: THREE.Vector3) => void;
+  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3) => void;
+  onCutPick: (id: string, p: THREE.Vector3) => void;
 };
 
 export function Scene(props: SceneProps) {
@@ -318,20 +372,25 @@ export function Scene(props: SceneProps) {
     objects,
     view,
     tool,
-    kind,
+    ghostSpec,
+    ghostScale,
     size,
     depth,
     snap,
+    shapeSnap,
     grid,
     material,
     dragPlane,
     selectedIds,
     measureA,
     measureB,
+    tapPoint,
     onSelect,
     onSelectNone,
     onMove,
     onMeasurePick,
+    onTapTarget,
+    onCutPick,
   } = props;
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -378,7 +437,13 @@ export function Scene(props: SceneProps) {
         </>
       )}
 
-      <CenterProbe depth={depth} size={size} snap={snap} grid={grid} />
+      <CenterProbe
+        depth={depth}
+        size={size}
+        snap={snap}
+        grid={grid}
+        shapeSnap={shapeSnap}
+      />
 
       <Grid
         args={[400, 400]}
@@ -399,7 +464,7 @@ export function Scene(props: SceneProps) {
       <Line points={[[0, -60, 0], [0, 200, 0]]} color="#8ce99a" lineWidth={1} transparent opacity={0.55} />
       <Line points={[[0, 0, -200], [0, 0, 200]]} color="#4fd1ff" lineWidth={1} transparent opacity={0.55} />
 
-      {/* Ground catcher for deselect / measure picks */}
+      {/* Ground catcher for deselect / measure / tap-target picks */}
       <mesh
         rotation-x={-Math.PI / 2}
         position={[0, 0, 0]}
@@ -410,6 +475,9 @@ export function Scene(props: SceneProps) {
             onMeasurePick(e.point.clone());
           } else if (tool === "edit") {
             onSelectNone();
+          } else if (tool === "place") {
+            e.stopPropagation();
+            onTapTarget(e.point.clone(), new THREE.Vector3(0, 1, 0));
           }
         }}
       >
@@ -435,10 +503,15 @@ export function Scene(props: SceneProps) {
           onSelect={onSelect}
           onMove={onMove}
           onMeasurePick={onMeasurePick}
+          onTapTarget={onTapTarget}
+          onCutPick={onCutPick}
         />
       ))}
 
-      {tool === "place" && <Ghost kind={kind} size={size} material={material} />}
+      {tool === "place" && (
+        <Ghost spec={ghostSpec} scale={ghostScale} material={material} />
+      )}
+      <TapMarker point={tapPoint} />
       <MeasureOverlay a={measureA} b={measureB} />
     </>
   );
