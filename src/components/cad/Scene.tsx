@@ -497,6 +497,14 @@ function ObjectMesh({
   };
 
   const onPointerMove = (e: ThreeEvent<PointerEvent>) => {
+    if (pressTimer.current) {
+      const dx = e.nativeEvent.clientX - pressStart.current.x;
+      const dy = e.nativeEvent.clientY - pressStart.current.y;
+      if (Math.hypot(dx, dy) > 8) {
+        clearTimeout(pressTimer.current);
+        pressTimer.current = null;
+      }
+    }
     if (!dragging.current) return;
     e.stopPropagation();
     if (!e.ray.intersectPlane(plane.current, hitPoint.current)) return;
@@ -519,6 +527,10 @@ function ObjectMesh({
 
   const endDrag = () => {
     dragging.current = false;
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
   };
 
   return (
@@ -670,6 +682,7 @@ export type SceneProps = {
   onMeasurePick: (p: THREE.Vector3) => void;
   onTapTarget: (p: THREE.Vector3, n: THREE.Vector3) => void;
   onCutPick: (id: string, p: THREE.Vector3, n: THREE.Vector3) => void;
+  onLongPress: (id: string, x: number, y: number) => void;
 };
 
 export function Scene(props: SceneProps) {
@@ -700,6 +713,7 @@ export function Scene(props: SceneProps) {
     onMeasurePick,
     onTapTarget,
     onCutPick,
+    onLongPress,
   } = props;
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -826,6 +840,7 @@ export function Scene(props: SceneProps) {
           onMeasurePick={onMeasurePick}
           onTapTarget={onTapTarget}
           onCutPick={onCutPick}
+          onLongPress={onLongPress}
         />
       ))}
 
