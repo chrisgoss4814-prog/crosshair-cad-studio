@@ -105,6 +105,20 @@ const CATS: { id: Cat; label: string; tool: ToolMode | null }[] = [
   { id: "files", label: "Files", tool: null },
 ];
 
+const CAT_HELP: Record<string, string> = {
+  move: "nav",
+  place: "place",
+  edit: "multi",
+  stretch: "stretchAxes",
+  cut: "cut",
+  snap: "solid",
+  motion: "motion",
+  style: "style",
+  measure: "measure",
+  ai: "ai",
+  files: "files",
+};
+
 const ROT_STEPS = [1, 5, 15, 90];
 const PREFS_KEY = "vb.controls.v1";
 
@@ -359,6 +373,9 @@ export function CadApp() {
   const [cat, setCat] = useState<Cat | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [sticks, setSticks] = useState(true);
+  const [nav, setNav] = useState<"gesture" | "swipe-look">("gesture");
+  const [helpId, setHelpId] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [kind, setKind] = useState<ShapeKind>("box");
   const [size, setSize] = useState(1);
   const [stretch, setStretch] = useState<[number, number, number]>([1, 1, 1]);
@@ -1221,6 +1238,27 @@ export function CadApp() {
       case "move":
         return (
           <>
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              <Chip
+                active={nav === "gesture"}
+                onClick={() => setNav("gesture")}
+                hint="nav"
+              >
+                Swipe fly
+              </Chip>
+              <Chip
+                active={nav === "swipe-look"}
+                onClick={() => setNav("swipe-look")}
+                hint="nav"
+              >
+                Swipe look
+              </Chip>
+            </div>
+            <p className="mb-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+              {nav === "gesture"
+                ? "Swipe any direction to fly that way; hold your finger there to keep going. Pinch moves forward and back. Use the Look stick to pivot in place."
+                : "Swipe rotates the view; two fingers pan and pinch."}
+            </p>
             <Slider
               label="speed"
               value={speed}
@@ -1585,29 +1623,43 @@ export function CadApp() {
         return (
           <>
             <div className="mb-1.5 flex flex-wrap gap-1.5">
-              <Chip active={snap} onClick={() => setSnap((s) => !s)}>
+              <Chip active={snap} onClick={() => setSnap((s) => !s)} hint="gridSnap">
                 Grid snap {snap ? "on" : "off"}
               </Chip>
-              <Chip active={shapeSnap} onClick={() => setShapeSnap((s) => !s)}>
+              <Chip
+                active={shapeSnap}
+                onClick={() => setShapeSnap((s) => !s)}
+                hint="shapeSnap"
+              >
                 Shape snap {shapeSnap ? "on" : "off"}
               </Chip>
-              <Chip active={blockOverlap} onClick={() => setBlockOverlap((b) => !b)}>
-                {blockOverlap ? "Block overlap" : "Allow overlap"}
+              <Chip
+                active={blockOverlap}
+                onClick={() => setBlockOverlap((b) => !b)}
+                hint="solid"
+              >
+                {blockOverlap ? "Solid" : "Ghost"}
               </Chip>
-              <Chip active={showGuides} onClick={() => setShowGuides((g) => !g)}>
+              <Chip
+                active={showGuides}
+                onClick={() => setShowGuides((g) => !g)}
+                hint="guides"
+              >
                 Align guides {showGuides ? "on" : "off"}
               </Chip>
-              <Chip active={magnet} onClick={() => setMagnet((m) => !m)}>
+              <Chip active={magnet} onClick={() => setMagnet((m) => !m)} hint="magnet">
                 Magnet {magnet ? "on" : "off"}
               </Chip>
-              <Chip active={!!tapPoint} onClick={clearTap}>
+              <Chip active={!!tapPoint} onClick={clearTap} hint="tapTarget">
                 {tapPoint ? "Clear tap target" : "No tap target"}
               </Chip>
             </div>
             {stepRow}
             <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
               Grid snap rounds to the active step ({step}m). Shape snap pulls to
-              corners, edge midpoints and face centers of nearby objects.
+              corners, edge midpoints and face centers of nearby objects. Tap a
+              face to set a target — the next shape rests on that surface.
+              Solid mode stops objects passing through each other.
               {alignedAxes.length
                 ? ` Selection lines up on ${alignedAxes.join(", ")}.`
                 : ""}
@@ -1860,6 +1912,7 @@ export function CadApp() {
         <Scene
           objects={objects}
           view={view}
+          nav={nav}
           tool={tool}
           ghostSpec={ghostSpec}
           ghostScale={stretch}
@@ -1925,19 +1978,28 @@ export function CadApp() {
         <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3">
           <div className="pointer-events-auto flex gap-1.5">
             {VIEWS.map((v) => (
-              <Chip key={v.id} active={view === v.id} onClick={() => setView(v.id)}>
+              <Chip
+                key={v.id}
+                active={view === v.id}
+                onClick={() => setView(v.id)}
+                hint="view"
+              >
                 {v.label}
               </Chip>
             ))}
           </div>
           <div className="pointer-events-auto flex gap-1.5">
-            <Chip active={precision} onClick={() => setPrecision((p) => !p)}>
+            <Chip
+              active={precision}
+              onClick={() => setPrecision((p) => !p)}
+              hint="fine"
+            >
               Fine {precision ? "on" : "off"}
             </Chip>
-            <Chip active={snap} onClick={() => setSnap((s) => !s)}>
+            <Chip active={snap} onClick={() => setSnap((s) => !s)} hint="gridSnap">
               Snap {snap ? "on" : "off"}
             </Chip>
-            <Btn onClick={undo} disabled={!objects.length}>
+            <Btn onClick={undo} disabled={!objects.length} hint="undo">
               Undo
             </Btn>
           </div>
@@ -2024,10 +2086,18 @@ export function CadApp() {
         {/* Category bar */}
         <div className="pointer-events-auto mx-auto flex w-full max-w-[520px] gap-1.5 overflow-x-auto rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
           {CATS.map((c) => (
-            <Chip key={c.id} active={cat === c.id} onClick={() => openCat(c.id)}>
+            <Chip
+              key={c.id}
+              active={cat === c.id}
+              onClick={() => openCat(c.id)}
+              hint={CAT_HELP[c.id]}
+            >
               {c.label}
             </Chip>
           ))}
+          <Chip active={guideOpen} onClick={() => setGuideOpen(true)}>
+            ? Guide
+          </Chip>
         </div>
 
         {/* Joysticks */}
