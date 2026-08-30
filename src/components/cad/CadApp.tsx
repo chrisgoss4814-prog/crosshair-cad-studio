@@ -340,6 +340,28 @@ export function CadApp() {
   const [precision, setPrecision] = useState(false);
   const [precisionLevel, setPrecisionLevel] = useState(0.2);
   const [playing, setPlaying] = useState(true);
+  const [confirmPlace, setConfirmPlace] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [magnet, setMagnet] = useState(true);
+  const [lastPlacedId, setLastPlacedId] = useState<string | null>(null);
+  const [quickMenu, setQuickMenu] = useState<{
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  type RecentSpec = {
+    kind: ShapeKind;
+    size: number;
+    stretch: [number, number, number];
+    sides: number;
+    curve: number;
+    extrude: number;
+    bend: number;
+    bendAxis: 0 | 1 | 2;
+    taper: number;
+  };
+  const [recent, setRecent] = useState<RecentSpec[]>([]);
 
   // Cut tool
   const [cutW, setCutW] = useState(0.5);
