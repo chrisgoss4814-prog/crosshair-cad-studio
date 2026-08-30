@@ -785,6 +785,19 @@ export function CadApp() {
   const applyProfileToSelected = (p: Shape2D) =>
     updateSelected((o) => ({ ...o, profile: p }));
 
+  const setSelectedPos = (axis: 0 | 1 | 2, v: number) => {
+    updateSelected((o) => {
+      const position = [...o.position] as [number, number, number];
+      position[axis] = +v.toFixed(6);
+      return { ...o, position };
+    });
+  };
+
+  const onLongPress = useCallback((id: string, x: number, y: number) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev : [id]));
+    setQuickMenu({ id, x, y });
+  }, []);
+
   const nudge = (axis: 0 | 1 | 2, dir: 1 | -1) => {
     const amount = (dragStep > 0 ? dragStep : step) * dir;
     updateSelected((o) => {
@@ -932,6 +945,17 @@ export function CadApp() {
   };
 
   const selectionCenter = useMemo(() => centroid(selectedObjects), [selectedObjects]);
+
+  // Publish the selection centroid so the fly rig can glide to it
+  // (double-tap on the canvas or the Focus button).
+  useEffect(() => {
+    if (selectedObjects.length) {
+      selectionFocusState.point.copy(selectionCenter);
+      selectionFocusState.valid = true;
+    } else {
+      selectionFocusState.valid = false;
+    }
+  }, [selectionCenter, selectedObjects.length]);
 
   const doSave = () => {
     const name = sceneName.trim() || `scene-${scenes.length + 1}`;
