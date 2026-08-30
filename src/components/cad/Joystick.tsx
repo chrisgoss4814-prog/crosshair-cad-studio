@@ -8,6 +8,18 @@ type Props = {
 const SIZE = 116;
 const RADIUS = SIZE / 2;
 const KNOB = 46;
+/** Center deadzone so a resting thumb never drifts. */
+const DEADZONE = 0.12;
+/** Response curve exponent — >1 makes small deflections slow and precise. */
+const RAMP = 1.7;
+
+/** Deadzone + easing ramp: gentle near center, fast at full deflection. */
+function shape(v: number) {
+  const a = Math.abs(v);
+  if (a < DEADZONE) return 0;
+  const t = (a - DEADZONE) / (1 - DEADZONE);
+  return Math.sign(v) * Math.pow(t, RAMP);
+}
 
 export function Joystick({ label, onChange }: Props) {
   const baseRef = useRef<HTMLDivElement>(null);
@@ -27,7 +39,7 @@ export function Joystick({ label, onChange }: Props) {
       dy = (dy / len) * max;
     }
     setKnob({ x: dx, y: dy });
-    onChange(dx / max, dy / max);
+    onChange(shape(dx / max), shape(dy / max));
   };
 
   const end = () => {
