@@ -812,12 +812,19 @@ export function CadApp() {
 
   const nudge = (axis: 0 | 1 | 2, dir: 1 | -1) => {
     const amount = (dragStep > 0 ? dragStep : step) * dir;
-    updateSelected((o) => {
-      const position = [...o.position] as [number, number, number];
-      position[axis] = +((position[axis] ?? 0) + amount).toFixed(6);
-      return { ...o, position };
-    });
+    const id = selectedIds[0];
+    if (!id) return;
+    const delta: [number, number, number] = [0, 0, 0];
+    delta[axis] = amount;
+    const first = objects.find((o) => o.id === id);
+    if (!first) return;
+    handleMove(id, [
+      first.position[0] + delta[0],
+      first.position[1] + delta[1],
+      first.position[2] + delta[2],
+    ]);
   };
+
 
   const stretchSelected = (axis: 0 | 1 | 2, dir: 1 | -1) => {
     updateSelected((o) => {
