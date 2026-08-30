@@ -654,3 +654,53 @@ export function magneticAlign(
   }
   return out;
 }
+
+function overlaps1d(
+  aMin: number,
+  aMax: number,
+  bMin: number,
+  bMax: number,
+  eps: number,
+) {
+  return aMin < bMax - eps && aMax > bMin + eps;
+}
+
+/**
+ * Solid-body move: given a box and a desired delta, return the delta that is
+ * actually allowed so the box never passes through any of `others`. Each axis
+ * is resolved separately, so a blocked object slides along the surface it hit
+ * instead of stopping dead.
+ */
+export function resolveMove(
+  box: THREE.Box3,
+  delta: THREE.Vector3,
+  others: THREE.Box3[],
+  eps = 1e-4,
+): THREE.Vector3 {
+  const cur = box.clone();
+  const out = new THREE.Vector3();
+  const axes = ["x", "y", "z"] as const;
+  for (const k of axes) {
+    const d = delta[k];
+    if (!d) continue;
+    const o1 = k === "x" ? "y" : "x";
+    const o2 = k === "z" ? "y" : "z";
+    let allowed = d;
+    for (const ob of others) {
+      if (!overlaps1d(cur.min[o1], cur.max[o1], ob.min[o1], ob.max[o1], eps)) continue;
+      if (!overlaps1d(cur.min[o2], cur.max[o2], ob.min[o2], ob.max[o2], eps)) continue;
+      if (d > 0) {
+        const gap = ob.min[k] - cur.max[k];
+        if (gap >= -eps) allowed = Math.min(allowed, Math.max(0, gap - eps));
+      } else {
+        const gap = ob.max[k] - cur.min[k];
+        if (gap <= eps) allowed = Math.max(allowed, Math.min(0, gap + eps));
+      }
+    }
+    out[k] = allowed;
+    cur.min[k] += allowed;
+    cur.max[k] += allowed;
+  }
+  return out;
+}
+
