@@ -22,9 +22,12 @@ import {
   DEFAULT_MOTION,
   geometryOf,
   hydrateObject,
+  magneticAlign,
   makeObject,
   boxesOverlap,
+  requestFlyFocus,
   sceneRefs,
+  selectionFocusState,
   SNAP,
   STEPS,
   SWATCHES,
@@ -180,7 +183,59 @@ function Slider({
   );
 }
 
-/** Slider + stepper that always moves in the active decimal step. */
+/** A readout you can tap to type an exact value. */
+function EditableValue({
+  value,
+  decimals = 3,
+  unit = "",
+  onCommit,
+  className = "",
+}: {
+  value: number;
+  decimals?: number;
+  unit?: string;
+  onCommit: (v: number) => void;
+  className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (editing) {
+    const commit = (raw: string) => {
+      const v = Number(raw);
+      if (raw.trim() !== "" && Number.isFinite(v)) onCommit(v);
+      setEditing(false);
+    };
+    return (
+      <input
+        autoFocus
+        type="number"
+        inputMode="decimal"
+        step="any"
+        defaultValue={+value.toFixed(6)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit(e.currentTarget.value);
+          if (e.key === "Escape") setEditing(false);
+        }}
+        onBlur={(e) => commit(e.target.value)}
+        className={`rounded border border-accent bg-background/80 px-1 text-right font-mono text-[11px] outline-none ${className}`}
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      title="Tap to type an exact value"
+      className={`text-right font-mono text-[11px] underline decoration-dotted decoration-muted-foreground/60 underline-offset-2 ${className}`}
+    >
+      {value.toFixed(decimals)}
+      {unit}
+    </button>
+  );
+}
+
+/** Slider + stepper that always moves in the active decimal step.
+ *  Long-press the slider for a smooth (detent-free) drag; tap the number to
+ *  type an exact value. */
 function NumRow({
   label,
   value,
@@ -198,9 +253,22 @@ function NumRow({
   onChange: (v: number) => void;
   unit?: string;
 }) {
+  const [free, setFree] = useState(false);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clamp = (v: number) =>
     Math.min(max, Math.max(min, +v.toFixed(6)));
   const decimals = step < 0.01 ? 3 : step < 1 ? 2 : 2;
+
+  const startHold = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = setTimeout(() => setFree(true), 450);
+  };
+  const endHold = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+    setFree(false);
+  };
+
   return (
     <div className="mb-1 flex items-center gap-1.5">
       <span className="w-12 shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -211,16 +279,23 @@ function NumRow({
         type="range"
         min={min}
         max={max}
-        step={step}
+        step={free ? (max - min) / 1000 : step}
         value={Math.min(max, Math.max(min, value))}
         onChange={(e) => onChange(clamp(Number(e.target.value)))}
-        className="min-w-0 flex-1 accent-accent"
+        onPointerDown={startHold}
+        onPointerUp={endHold}
+        onPointerCancel={endHold}
+        onPointerLeave={endHold}
+        className={`min-w-0 flex-1 accent-accent ${free ? "opacity-80" : ""}`}
       />
       <Btn onClick={() => onChange(clamp(value + step))}>+</Btn>
-      <span className="w-16 shrink-0 text-right font-mono text-[11px]">
-        {value.toFixed(decimals)}
-        {unit}
-      </span>
+      <EditableValue
+        value={value}
+        decimals={decimals}
+        unit={unit}
+        onCommit={(v) => onChange(clamp(v))}
+        className="w-16 shrink-0"
+      />
     </div>
   );
 }
@@ -265,6 +340,28 @@ export function CadApp() {
   const [precision, setPrecision] = useState(false);
   const [precisionLevel, setPrecisionLevel] = useState(0.2);
   const [playing, setPlaying] = useState(true);
+  const [confirmPlace, setConfirmPlace] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [magnet, setMagnet] = useState(true);
+  const [lastPlacedId, setLastPlacedId] = useState<string | null>(null);
+  const [quickMenu, setQuickMenu] = useState<{
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  type RecentSpec = {
+    kind: ShapeKind;
+    size: number;
+    stretch: [number, number, number];
+    sides: number;
+    curve: number;
+    extrude: number;
+    bend: number;
+    bendAxis: 0 | 1 | 2;
+    taper: number;
+  };
+  const [recent, setRecent] = useState<RecentSpec[]>([]);
 
   // Cut tool
   const [cutW, setCutW] = useState(0.5);
@@ -389,6 +486,12 @@ export function CadApp() {
   );
 
   const place = () => {
+    // Confirm mode: the first tap arms, the second commits.
+    if (confirmPlace && !armed) {
+      setArmed(true);
+      return;
+    }
+    setArmed(false);
     const p = centerPoint;
     const next = makeObject(kind, [p.x, p.y, p.z], size, material, {
       scale: [...stretch] as [number, number, number],
@@ -404,7 +507,54 @@ export function CadApp() {
       return;
     }
     setObjects((prev) => [...prev, next]);
+    setLastPlacedId(next.id);
+    const spec: RecentSpec = {
+      kind,
+      size,
+      stretch: [...stretch] as [number, number, number],
+      sides,
+      curve,
+      extrude,
+      bend,
+      bendAxis,
+      taper,
+    };
+    setRecent((prev) => {
+      const key = JSON.stringify(spec);
+      return [spec, ...prev.filter((r) => JSON.stringify(r) !== key)].slice(0, 4);
+    });
     clearTap();
+  };
+
+  const applyRecent = (r: RecentSpec) => {
+    setKind(r.kind);
+    setSize(r.size);
+    setStretch([...r.stretch] as [number, number, number]);
+    setLockStretch(false);
+    setSides(r.sides);
+    setCurve(r.curve);
+    setExtrude(r.extrude);
+    setBend(r.bend);
+    setBendAxis(r.bendAxis);
+    setTaper(r.taper);
+  };
+
+  /** Place another copy of the last object, offset beside it like a brick. */
+  const repeat = () => {
+    const last =
+      objects.find((o) => o.id === lastPlacedId) ?? objects[objects.length - 1];
+    if (!last) return;
+    const s = worldBoxOf(last).getSize(new THREE.Vector3());
+    const copy: PlacedObject = {
+      ...cloneObject(last, 0),
+      position: [last.position[0] + s.x, last.position[1], last.position[2]],
+    };
+    if (wouldCollide(copy, [])) {
+      toast.error("Blocked — that spot overlaps another object");
+      return;
+    }
+    setObjects((prev) => [...prev, copy]);
+    setLastPlacedId(copy.id);
   };
 
   const undo = () => setObjects((prev) => prev.slice(0, -1));
@@ -432,7 +582,7 @@ export function CadApp() {
         if (!dx && !dy && !dz) return prev;
         const ids =
           selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id];
-        const moved = prev.map((o) =>
+        let moved = prev.map((o) =>
           ids.includes(o.id)
             ? {
                 ...o,
@@ -444,6 +594,36 @@ export function CadApp() {
               }
             : o,
         );
+        // Magnetic alignment: a single dragged object softly snaps into
+        // perfect line-up with neighbours.
+        if (magnet && ids.length === 1) {
+          const target = moved.find((o) => o.id === ids[0]);
+          if (target) {
+            const box = worldBoxOf(target);
+            const others = moved
+              .filter((o) => o.id !== target.id)
+              .map((o) => ({ id: o.id, box: worldBoxOf(o) }));
+            const fix = magneticAlign(box, others, Math.max(0.04, grid * 0.12));
+            const c = box.getCenter(new THREE.Vector3());
+            const mdx = (fix.x ?? c.x) - c.x;
+            const mdy = (fix.y ?? c.y) - c.y;
+            const mdz = (fix.z ?? c.z) - c.z;
+            if (mdx || mdy || mdz) {
+              moved = moved.map((o) =>
+                o.id === target.id
+                  ? {
+                      ...o,
+                      position: [
+                        +(o.position[0] + mdx).toFixed(6),
+                        +(o.position[1] + mdy).toFixed(6),
+                        +(o.position[2] + mdz).toFixed(6),
+                      ] as [number, number, number],
+                    }
+                  : o,
+              );
+            }
+          }
+        }
         if (blockOverlap) {
           const others = moved.filter((o) => !ids.includes(o.id));
           const boxes = others.map((o) => worldBoxOf(o));
@@ -458,7 +638,7 @@ export function CadApp() {
         return moved;
       });
     },
-    [selectedIds, blockOverlap],
+    [selectedIds, blockOverlap, magnet, grid],
   );
 
   const onTapTarget = useCallback((p: THREE.Vector3, n: THREE.Vector3) => {
@@ -605,6 +785,19 @@ export function CadApp() {
   const applyProfileToSelected = (p: Shape2D) =>
     updateSelected((o) => ({ ...o, profile: p }));
 
+  const setSelectedPos = (axis: 0 | 1 | 2, v: number) => {
+    updateSelected((o) => {
+      const position = [...o.position] as [number, number, number];
+      position[axis] = +v.toFixed(6);
+      return { ...o, position };
+    });
+  };
+
+  const onLongPress = useCallback((id: string, x: number, y: number) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev : [id]));
+    setQuickMenu({ id, x, y });
+  }, []);
+
   const nudge = (axis: 0 | 1 | 2, dir: 1 | -1) => {
     const amount = (dragStep > 0 ? dragStep : step) * dir;
     updateSelected((o) => {
@@ -668,12 +861,14 @@ export function CadApp() {
     }));
   };
 
-  const duplicate = () => {
-    if (!selectedObjects.length) return;
-    const copies = selectedObjects.map((o) => cloneObject(o, snap ? grid : 0.25));
+  const duplicateObjects = (list: PlacedObject[]) => {
+    if (!list.length) return;
+    const copies = list.map((o) => cloneObject(o, snap ? grid : 0.25));
     setObjects((prev) => [...prev, ...copies]);
     setSelectedIds(copies.map((c) => c.id));
   };
+
+  const duplicate = () => duplicateObjects(selectedObjects);
 
   const removeSelected = () => {
     setObjects((prev) => prev.filter((o) => !selectedIds.includes(o.id)));
@@ -750,6 +945,17 @@ export function CadApp() {
   };
 
   const selectionCenter = useMemo(() => centroid(selectedObjects), [selectedObjects]);
+
+  // Publish the selection centroid so the fly rig can glide to it
+  // (double-tap on the canvas or the Focus button).
+  useEffect(() => {
+    if (selectedObjects.length) {
+      selectionFocusState.point.copy(selectionCenter);
+      selectionFocusState.valid = true;
+    } else {
+      selectionFocusState.valid = false;
+    }
+  }, [selectionCenter, selectedObjects.length]);
 
   const doSave = () => {
     const name = sceneName.trim() || `scene-${scenes.length + 1}`;
@@ -1015,7 +1221,18 @@ export function CadApp() {
               <div className="h-1" />
               {shapeList(SHAPES_2D)}
             </div>
-            <div className="mt-1.5">{stepRow}</div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {stepRow}
+              <Chip
+                active={confirmPlace}
+                onClick={() => {
+                  setConfirmPlace((c) => !c);
+                  setArmed(false);
+                }}
+              >
+                Confirm {confirmPlace ? "on" : "off"}
+              </Chip>
+            </div>
             <div className="mt-1.5">
               <div className="mb-1 flex items-center gap-2">
                 <Chip active={lockStretch} onClick={() => setLockStretch((l) => !l)}>
@@ -1156,6 +1373,12 @@ export function CadApp() {
               <Btn onClick={removeSelected} disabled={!selectedIds.length}>
                 Del
               </Btn>
+              <Btn
+                onClick={() => requestFlyFocus(selectionFocusState.point)}
+                disabled={!selectedIds.length}
+              >
+                Focus
+              </Btn>
             </div>
             {stepRow}
             <div className="mt-1.5">
@@ -1185,9 +1408,11 @@ export function CadApp() {
                       {label}
                     </span>
                     <Btn onClick={() => nudge(axis, -1)}>−</Btn>
-                    <span className="min-w-16 text-center font-mono text-[11px]">
-                      {(selectedOne.position[axis] ?? 0).toFixed(3)}
-                    </span>
+                    <EditableValue
+                      value={selectedOne.position[axis] ?? 0}
+                      onCommit={(v) => setSelectedPos(axis, v)}
+                      className="min-w-16 text-center"
+                    />
                     <Btn onClick={() => nudge(axis, 1)}>+</Btn>
                     <span className="ml-auto flex items-center gap-1">
                       <Btn onClick={() => rotate(axis, -1)}>↺</Btn>
@@ -1300,6 +1525,9 @@ export function CadApp() {
               </Chip>
               <Chip active={showGuides} onClick={() => setShowGuides((g) => !g)}>
                 Align guides {showGuides ? "on" : "off"}
+              </Chip>
+              <Chip active={magnet} onClick={() => setMagnet((m) => !m)}>
+                Magnet {magnet ? "on" : "off"}
               </Chip>
               <Chip active={!!tapPoint} onClick={clearTap}>
                 {tapPoint ? "Clear tap target" : "No tap target"}
@@ -1585,6 +1813,7 @@ export function CadApp() {
           onMeasurePick={onMeasurePick}
           onTapTarget={onTapTarget}
           onCutPick={onCutPick}
+          onLongPress={onLongPress}
         />
       </Canvas>
 
@@ -1631,6 +1860,9 @@ export function CadApp() {
             ))}
           </div>
           <div className="pointer-events-auto flex gap-1.5">
+            <Chip active={precision} onClick={() => setPrecision((p) => !p)}>
+              Fine {precision ? "on" : "off"}
+            </Chip>
             <Chip active={snap} onClick={() => setSnap((s) => !s)}>
               Snap {snap ? "on" : "off"}
             </Chip>
@@ -1675,17 +1907,40 @@ export function CadApp() {
           </button>
         )}
 
+        {/* Recent-shape quick bar */}
+        {tool === "place" && recent.length > 0 && (!focused || cat === "place") && (
+          <div className="pointer-events-auto mx-auto flex max-w-full gap-1.5 overflow-x-auto">
+            {recent.map((r, i) => (
+              <Chip key={i} active={false} onClick={() => applyRecent(r)}>
+                {r.kind} {+r.size.toFixed(3)}
+              </Chip>
+            ))}
+          </div>
+        )}
+
         {/* Place / measure action button */}
         {(!focused || cat === "place" || cat === "measure") && (
-          <div className="pointer-events-auto mx-auto">
+          <div className="pointer-events-auto mx-auto flex items-center gap-2">
             {tool === "place" && (
-              <button
-                type="button"
-                onClick={place}
-                className="rounded-full border border-accent bg-accent/25 px-7 py-3 font-mono text-sm uppercase tracking-[0.2em] text-foreground shadow-glow backdrop-blur-md active:scale-95"
-              >
-                Add
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={place}
+                  className="rounded-full border border-accent bg-accent/25 px-7 py-3 font-mono text-sm uppercase tracking-[0.2em] text-foreground shadow-glow backdrop-blur-md active:scale-95"
+                >
+                  {armed ? "Place here" : "Add"}
+                </button>
+                {armed && (
+                  <Btn onClick={() => setArmed(false)} className="rounded-full">
+                    Cancel
+                  </Btn>
+                )}
+                {!armed && objects.length > 0 && (
+                  <Btn onClick={repeat} className="rounded-full">
+                    Repeat
+                  </Btn>
+                )}
+              </>
             )}
             {tool === "cut" && !focused && (
               <span className="rounded-full border border-grid-line bg-panel/85 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -1750,6 +2005,54 @@ export function CadApp() {
           </div>
         )}
       </div>
+
+      {/* Long-press quick menu */}
+      {quickMenu && (
+        <div
+          className="absolute z-50 flex items-center gap-1.5 rounded-lg border border-grid-line bg-panel/95 p-1.5 shadow-hud backdrop-blur-md"
+          style={{
+            left: Math.max(8, Math.min(quickMenu.x - 80, window.innerWidth - 260)),
+            top: Math.max(8, quickMenu.y - 60),
+          }}
+        >
+          <Btn
+            onClick={() => {
+              duplicateObjects(objects.filter((o) => o.id === quickMenu.id));
+              setQuickMenu(null);
+            }}
+          >
+            Dup
+          </Btn>
+          <Btn
+            onClick={() => {
+              setSelectedIds([quickMenu.id]);
+              setQuickMenu(null);
+              openCat("edit");
+            }}
+          >
+            Edit
+          </Btn>
+          <Btn
+            onClick={() => {
+              setSelectedIds([quickMenu.id]);
+              setQuickMenu(null);
+              openCat("motion");
+            }}
+          >
+            Motion
+          </Btn>
+          <Btn
+            onClick={() => {
+              setObjects((prev) => prev.filter((o) => o.id !== quickMenu.id));
+              setSelectedIds((prev) => prev.filter((i) => i !== quickMenu.id));
+              setQuickMenu(null);
+            }}
+          >
+            Del
+          </Btn>
+          <Btn onClick={() => setQuickMenu(null)}>✕</Btn>
+        </div>
+      )}
 
       {/* Selection readout */}
       {selectedIds.length > 0 && !focused && (
