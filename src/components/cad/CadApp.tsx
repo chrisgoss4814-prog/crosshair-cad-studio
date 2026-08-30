@@ -1553,7 +1553,11 @@ export function CadApp() {
     <main className="fixed inset-0 overflow-hidden bg-background text-foreground">
       <h1 className="sr-only">Vector Bay — 3D CAD sketchpad</h1>
 
-      <Canvas shadows camera={{ position: [0, 2.2, 9], fov: 62 }}>
+      <Canvas
+        shadows
+        camera={{ position: [0, 2.2, 9], fov: 62 }}
+        style={{ touchAction: "none" }}
+      >
         <Scene
           objects={objects}
           view={view}
