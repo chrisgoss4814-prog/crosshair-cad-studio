@@ -20,6 +20,7 @@ import {
   controls,
   DEFAULT_MATERIAL,
   DEFAULT_MOTION,
+  geometryOf,
   hydrateObject,
   makeObject,
   boxesOverlap,
