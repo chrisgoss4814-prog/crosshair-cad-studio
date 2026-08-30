@@ -300,7 +300,7 @@ export function evaluateBoolean(
   toolGeo: THREE.BufferGeometry,
   toolMatrix: THREE.Matrix4,
   op: BooleanOp,
-): THREE.BufferGeometry {
+): THREE.BufferGeometry | null {
   try {
     const a = new Brush(baseGeo.clone());
     a.matrix.copy(baseMatrix);
@@ -314,14 +314,18 @@ export function evaluateBoolean(
 
     const result = evaluator.evaluate(a, b, OPS[op]);
     const out = result.geometry.clone();
+    const count = out.getAttribute("position")?.count ?? 0;
+    // An empty (or degenerate) result means the cut swallowed the solid — reject it.
+    if (count < 12) return null;
     // Bring the result back into the base object's local space.
     out.applyMatrix4(new THREE.Matrix4().copy(baseMatrix).invert());
     out.computeVertexNormals();
     return out;
   } catch {
-    return baseGeo;
+    return null;
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // Public builder + cache
