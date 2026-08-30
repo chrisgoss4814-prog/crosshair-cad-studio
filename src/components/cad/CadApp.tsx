@@ -843,7 +843,7 @@ export function CadApp() {
         data: {
           prompt: text,
           preferences: prefsPrompt(prefs),
-          examples: examplesPrompt(),
+          examples: examplesPrompt(text),
           scene: sceneSummary(),
         },
       });
