@@ -22,9 +22,12 @@ import {
   DEFAULT_MOTION,
   geometryOf,
   hydrateObject,
+  magneticAlign,
   makeObject,
   boxesOverlap,
+  requestFlyFocus,
   sceneRefs,
+  selectionFocusState,
   SNAP,
   STEPS,
   SWATCHES,
@@ -180,7 +183,59 @@ function Slider({
   );
 }
 
-/** Slider + stepper that always moves in the active decimal step. */
+/** A readout you can tap to type an exact value. */
+function EditableValue({
+  value,
+  decimals = 3,
+  unit = "",
+  onCommit,
+  className = "",
+}: {
+  value: number;
+  decimals?: number;
+  unit?: string;
+  onCommit: (v: number) => void;
+  className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (editing) {
+    const commit = (raw: string) => {
+      const v = Number(raw);
+      if (raw.trim() !== "" && Number.isFinite(v)) onCommit(v);
+      setEditing(false);
+    };
+    return (
+      <input
+        autoFocus
+        type="number"
+        inputMode="decimal"
+        step="any"
+        defaultValue={+value.toFixed(6)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit(e.currentTarget.value);
+          if (e.key === "Escape") setEditing(false);
+        }}
+        onBlur={(e) => commit(e.target.value)}
+        className={`rounded border border-accent bg-background/80 px-1 text-right font-mono text-[11px] outline-none ${className}`}
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      title="Tap to type an exact value"
+      className={`text-right font-mono text-[11px] underline decoration-dotted decoration-muted-foreground/60 underline-offset-2 ${className}`}
+    >
+      {value.toFixed(decimals)}
+      {unit}
+    </button>
+  );
+}
+
+/** Slider + stepper that always moves in the active decimal step.
+ *  Long-press the slider for a smooth (detent-free) drag; tap the number to
+ *  type an exact value. */
 function NumRow({
   label,
   value,
@@ -198,9 +253,22 @@ function NumRow({
   onChange: (v: number) => void;
   unit?: string;
 }) {
+  const [free, setFree] = useState(false);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clamp = (v: number) =>
     Math.min(max, Math.max(min, +v.toFixed(6)));
   const decimals = step < 0.01 ? 3 : step < 1 ? 2 : 2;
+
+  const startHold = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = setTimeout(() => setFree(true), 450);
+  };
+  const endHold = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+    setFree(false);
+  };
+
   return (
     <div className="mb-1 flex items-center gap-1.5">
       <span className="w-12 shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -211,16 +279,23 @@ function NumRow({
         type="range"
         min={min}
         max={max}
-        step={step}
+        step={free ? (max - min) / 1000 : step}
         value={Math.min(max, Math.max(min, value))}
         onChange={(e) => onChange(clamp(Number(e.target.value)))}
-        className="min-w-0 flex-1 accent-accent"
+        onPointerDown={startHold}
+        onPointerUp={endHold}
+        onPointerCancel={endHold}
+        onPointerLeave={endHold}
+        className={`min-w-0 flex-1 accent-accent ${free ? "opacity-80" : ""}`}
       />
       <Btn onClick={() => onChange(clamp(value + step))}>+</Btn>
-      <span className="w-16 shrink-0 text-right font-mono text-[11px]">
-        {value.toFixed(decimals)}
-        {unit}
-      </span>
+      <EditableValue
+        value={value}
+        decimals={decimals}
+        unit={unit}
+        onCommit={(v) => onChange(clamp(v))}
+        className="w-16 shrink-0"
+      />
     </div>
   );
 }
