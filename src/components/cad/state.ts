@@ -407,17 +407,76 @@ export function geometryOf(o: PlacedObject): THREE.BufferGeometry {
       taper: 0,
       profile: null,
     });
-    geo = evaluateBoolean(
+    const next = evaluateBoolean(
       geo,
       baseMatrix,
       toolGeo,
       matrixOf(op.position, op.rotation, op.scale),
       op.op,
     );
+    // A failed / empty result is skipped so the object never vanishes.
+    if (next) geo = next;
   }
   _m.identity();
   return geo;
 }
+
+/** World-space bounding box of an object (base shape, ignoring cuts). */
+export function worldBoxOf(o: PlacedObject): THREE.Box3 {
+  const geo = buildGeometry(specOf(o));
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  return geo
+    .boundingBox!.clone()
+    .applyMatrix4(matrixOf(o.position, o.rotation, o.scale ?? [o.size, o.size, o.size]));
+}
+
+/** True when two boxes share volume (a shared face alone does not count). */
+export function boxesOverlap(a: THREE.Box3, b: THREE.Box3, eps = 1e-4) {
+  return (
+    a.min.x < b.max.x - eps &&
+    a.max.x > b.min.x + eps &&
+    a.min.y < b.max.y - eps &&
+    a.max.y > b.min.y + eps &&
+    a.min.z < b.max.z - eps &&
+    a.max.z > b.min.z + eps
+  );
+}
+
+export type AlignHit = { axis: 0 | 1 | 2; value: number; otherId: string };
+
+/**
+ * Axes on which `box` lines up with another object's box — matching centers,
+ * min edges or max edges within `tol`.
+ */
+export function alignmentsFor(
+  box: THREE.Box3,
+  others: { id: string; box: THREE.Box3 }[],
+  tol: number,
+): AlignHit[] {
+  const out: AlignHit[] = [];
+  const keys = ["x", "y", "z"] as const;
+  const c = box.getCenter(new THREE.Vector3());
+  for (const other of others) {
+    const oc = other.box.getCenter(new THREE.Vector3());
+    keys.forEach((k, axis) => {
+      const pairs: [number, number][] = [
+        [c[k], oc[k]],
+        [box.min[k], other.box.min[k]],
+        [box.max[k], other.box.max[k]],
+        [box.min[k], other.box.max[k]],
+        [box.max[k], other.box.min[k]],
+      ];
+      for (const [a, b] of pairs) {
+        if (Math.abs(a - b) <= tol) {
+          out.push({ axis: axis as 0 | 1 | 2, value: b, otherId: other.id });
+          return;
+        }
+      }
+    });
+  }
+  return out;
+}
+
 
 export function cloneObject(o: PlacedObject, offset = 0): PlacedObject {
   return {
