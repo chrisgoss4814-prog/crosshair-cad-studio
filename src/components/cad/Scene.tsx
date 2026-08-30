@@ -425,6 +425,20 @@ function ObjectMesh({
     );
   });
 
+  // Selection pulse — a soft breathing glow so the active object is obvious.
+  useFrame((_, delta) => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const mat = mesh.material as THREE.MeshStandardMaterial;
+    if (selected) {
+      pulseClock.current += delta;
+      mat.emissive.set("#4fd1ff");
+      mat.emissiveIntensity = 0.14 + 0.1 * Math.sin(pulseClock.current * 4);
+    } else if (mat.emissiveIntensity !== 0) {
+      mat.emissiveIntensity = 0;
+    }
+  });
+
   const stepped = (v: number, base: number) =>
     dragStep > 0 ? base + roundTo(v - base, dragStep) : v;
 
@@ -454,6 +468,14 @@ function ObjectMesh({
     e.stopPropagation();
     onSelect(o.id, e.nativeEvent.shiftKey);
     (e.target as Element)?.setPointerCapture?.(e.pointerId);
+
+    // Long-press opens the quick menu; any real drag cancels it.
+    pressStart.current = { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY };
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(() => {
+      dragging.current = false;
+      onLongPress(o.id, pressStart.current.x, pressStart.current.y);
+    }, 550);
 
     const objPos = new THREE.Vector3(...o.position);
     if (dragPlane === "horizontal") {
