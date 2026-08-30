@@ -35,6 +35,32 @@ export type CutOp = {
   scale: [number, number, number];
 };
 
+export type MotionMode = "off" | "linear" | "oscillate" | "orbit";
+
+/** Animated motion attached to an object; never changes its stored position. */
+export type MotionSpec = {
+  mode: MotionMode;
+  /** 0 = X, 1 = Y, 2 = Z — travel axis, or orbit axis for "orbit". */
+  axis: 0 | 1 | 2;
+  /** Travel distance in metres, or orbit radius. */
+  distance: number;
+  /** Metres per second (or radians per second for orbit). */
+  speed: number;
+  /** 0 = constant speed, 1 = fully eased accelerate/decelerate. */
+  accel: number;
+  /** Seconds paused at each end of a leg. */
+  pause: number;
+};
+
+export const DEFAULT_MOTION: MotionSpec = {
+  mode: "off",
+  axis: 0,
+  distance: 2,
+  speed: 1,
+  accel: 0.5,
+  pause: 0.5,
+};
+
 export type PlacedObject = {
   id: string;
   kind: ShapeKind;
@@ -53,11 +79,53 @@ export type PlacedObject = {
   taper: number;
   profile: Shape2D | null;
   ops: CutOp[];
+  motion: MotionSpec | null;
   color: string;
   metalness: number;
   roughness: number;
   groupId: string | null;
 };
+
+/** Animated offset for a motion spec at time `t` seconds. */
+export function motionOffset(m: MotionSpec, t: number): THREE.Vector3 {
+  const out = new THREE.Vector3();
+  if (!m || m.mode === "off") return out;
+  const speed = Math.max(0.0001, m.speed);
+
+  if (m.mode === "orbit") {
+    const a = t * speed;
+    const r = m.distance;
+    if (m.axis === 1) out.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+    else if (m.axis === 0) out.set(0, Math.cos(a) * r, Math.sin(a) * r);
+    else out.set(Math.cos(a) * r, Math.sin(a) * r, 0);
+    return out;
+  }
+
+  const travel = Math.max(0.0001, m.distance / speed);
+  const leg = travel + Math.max(0, m.pause);
+  const pingpong = m.mode === "oscillate";
+  const cycle = pingpong ? leg * 2 : leg;
+  const phase = ((t % cycle) + cycle) % cycle;
+
+  let u: number;
+  if (phase < travel) u = phase / travel;
+  else if (phase < leg) u = 1;
+  else {
+    const back = phase - leg;
+    u = pingpong ? (back < travel ? 1 - back / travel : 0) : 0;
+  }
+
+  // Acceleration curve: blend linear with smoothstep.
+  const eased = u * u * (3 - 2 * u);
+  const k = THREE.MathUtils.clamp(m.accel, 0, 1);
+  const d = (u * (1 - k) + eased * k) * m.distance;
+
+  if (m.axis === 0) out.x = d;
+  else if (m.axis === 1) out.y = d;
+  else out.z = d;
+  return out;
+}
+
 
 export const DEFAULT_MATERIAL: Material = {
   color: "#8fa7bd",
