@@ -1221,7 +1221,18 @@ export function CadApp() {
               <div className="h-1" />
               {shapeList(SHAPES_2D)}
             </div>
-            <div className="mt-1.5">{stepRow}</div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {stepRow}
+              <Chip
+                active={confirmPlace}
+                onClick={() => {
+                  setConfirmPlace((c) => !c);
+                  setArmed(false);
+                }}
+              >
+                Confirm {confirmPlace ? "on" : "off"}
+              </Chip>
+            </div>
             <div className="mt-1.5">
               <div className="mb-1 flex items-center gap-2">
                 <Chip active={lockStretch} onClick={() => setLockStretch((l) => !l)}>
@@ -1362,6 +1373,12 @@ export function CadApp() {
               <Btn onClick={removeSelected} disabled={!selectedIds.length}>
                 Del
               </Btn>
+              <Btn
+                onClick={() => requestFlyFocus(selectionFocusState.point)}
+                disabled={!selectedIds.length}
+              >
+                Focus
+              </Btn>
             </div>
             {stepRow}
             <div className="mt-1.5">
@@ -1391,9 +1408,11 @@ export function CadApp() {
                       {label}
                     </span>
                     <Btn onClick={() => nudge(axis, -1)}>−</Btn>
-                    <span className="min-w-16 text-center font-mono text-[11px]">
-                      {(selectedOne.position[axis] ?? 0).toFixed(3)}
-                    </span>
+                    <EditableValue
+                      value={selectedOne.position[axis] ?? 0}
+                      onCommit={(v) => setSelectedPos(axis, v)}
+                      className="min-w-16 text-center"
+                    />
                     <Btn onClick={() => nudge(axis, 1)}>+</Btn>
                     <span className="ml-auto flex items-center gap-1">
                       <Btn onClick={() => rotate(axis, -1)}>↺</Btn>
@@ -1506,6 +1525,9 @@ export function CadApp() {
               </Chip>
               <Chip active={showGuides} onClick={() => setShowGuides((g) => !g)}>
                 Align guides {showGuides ? "on" : "off"}
+              </Chip>
+              <Chip active={magnet} onClick={() => setMagnet((m) => !m)}>
+                Magnet {magnet ? "on" : "off"}
               </Chip>
               <Chip active={!!tapPoint} onClick={clearTap}>
                 {tapPoint ? "Clear tap target" : "No tap target"}
