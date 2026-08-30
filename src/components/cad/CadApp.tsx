@@ -376,6 +376,8 @@ export function CadApp() {
   const [nav, setNav] = useState<"gesture" | "swipe-look">("gesture");
   const [helpId, setHelpId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
+  const placeHold = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const placeFired = useRef(false);
   const [kind, setKind] = useState<ShapeKind>("box");
   const [size, setSize] = useState(1);
   const [stretch, setStretch] = useState<[number, number, number]>([1, 1, 1]);
@@ -1463,13 +1465,13 @@ export function CadApp() {
               >
                 {dragPlane === "facing" ? "Face" : "Horz"}
               </Chip>
-              <Btn onClick={duplicate} disabled={!selectedIds.length}>
+              <Btn onClick={duplicate} disabled={!selectedIds.length} hint="dup">
                 Dup
               </Btn>
-              <Btn onClick={groupSelected} disabled={selectedIds.length < 2}>
+              <Btn onClick={groupSelected} disabled={selectedIds.length < 2} hint="group">
                 Group
               </Btn>
-              <Btn onClick={ungroupSelected} disabled={!selectedIds.length}>
+              <Btn onClick={ungroupSelected} disabled={!selectedIds.length} hint="ungroup">
                 Ungrp
               </Btn>
               <Btn onClick={() => booleanSelected("union")} disabled={selectedIds.length < 2}>
@@ -1478,8 +1480,8 @@ export function CadApp() {
               <Btn onClick={() => booleanSelected("subtract")} disabled={selectedIds.length < 2}>
                 Sub
               </Btn>
-              <Btn onClick={undoLastCut}>Uncut</Btn>
-              <Btn onClick={removeSelected} disabled={!selectedIds.length}>
+              <Btn onClick={undoLastCut} hint="uncut">Uncut</Btn>
+              <Btn onClick={removeSelected} disabled={!selectedIds.length} hint="del">
                 Del
               </Btn>
               <Btn
@@ -1606,7 +1608,7 @@ export function CadApp() {
             <div className="flex flex-wrap items-center gap-1.5">
               {cutPick ? (
                 <>
-                  <Btn onClick={applyCut}>Apply cut</Btn>
+                  <Btn onClick={applyCut} hint="cut">Apply cut</Btn>
                   <Btn onClick={() => setCutPick(null)}>Cancel</Btn>
                 </>
               ) : (
@@ -1614,7 +1616,7 @@ export function CadApp() {
                   Tap the face you want to cut into.
                 </span>
               )}
-              <Btn onClick={undoLastCut}>Undo cut</Btn>
+              <Btn onClick={undoLastCut} hint="uncut">Undo cut</Btn>
             </div>
           </>
         );
@@ -2062,6 +2064,22 @@ export function CadApp() {
                 <button
                   type="button"
                   onClick={place}
+                  onPointerDown={() => {
+                    placeHold.current = setTimeout(() => {
+                      placeFired.current = true;
+                      setHelpId("place");
+                    }, 500);
+                  }}
+                  onPointerUp={() => {
+                    if (placeHold.current) clearTimeout(placeHold.current);
+                  }}
+                  onClickCapture={(e) => {
+                    if (placeFired.current) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      placeFired.current = false;
+                    }
+                  }}
                   className="rounded-full border border-accent bg-accent/25 px-7 py-3 font-mono text-sm uppercase tracking-[0.2em] text-foreground shadow-glow backdrop-blur-md active:scale-95"
                 >
                   {armed ? "Place here" : "Add"}
@@ -2072,7 +2090,7 @@ export function CadApp() {
                   </Btn>
                 )}
                 {!armed && objects.length > 0 && (
-                  <Btn onClick={repeat} className="rounded-full">
+                  <Btn onClick={repeat} className="rounded-full" hint="repeat">
                     Repeat
                   </Btn>
                 )}
