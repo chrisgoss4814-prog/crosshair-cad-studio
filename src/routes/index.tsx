@@ -9,13 +9,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Fly through 3D space with dual joysticks, aim a precision crosshair, and place solids on an X/Y/Z grid.",
+          "Fly, orbit, or work top-down with screen-locked X/Y/Z rulers. Face-snap stack solids, edit, measure, and save scenes locally.",
       },
       { property: "og:title", content: "Vector Bay — First-Person 3D CAD Sketchpad" },
       {
         property: "og:description",
         content:
-          "Fly through 3D space with dual joysticks, aim a precision crosshair, and place solids on an X/Y/Z grid.",
+          "Fly, orbit, or work top-down with screen-locked X/Y/Z rulers. Face-snap stack solids, edit, measure, and save scenes locally.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
