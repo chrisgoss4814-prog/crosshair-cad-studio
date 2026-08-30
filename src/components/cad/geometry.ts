@@ -317,8 +317,23 @@ export function evaluateBoolean(
     const count = out.getAttribute("position")?.count ?? 0;
     // An empty (or degenerate) result means the cut swallowed the solid — reject it.
     if (count < 12) return null;
-    // Bring the result back into the base object's local space.
-    out.applyMatrix4(new THREE.Matrix4().copy(baseMatrix).invert());
+    // Evaluator keeps the result geometry in brush A's local coordinate space
+    // and puts A's world transform on the returned Brush. Applying the inverse
+    // matrix here a second time displaced/scaled the geometry away from its mesh,
+    // which made a successful cut look like the entire object was deleted.
+    const position = out.getAttribute("position") as THREE.BufferAttribute | undefined;
+    if (!position) return null;
+    for (let i = 0; i < position.count; i++) {
+      if (
+        !Number.isFinite(position.getX(i)) ||
+        !Number.isFinite(position.getY(i)) ||
+        !Number.isFinite(position.getZ(i))
+      ) {
+        return null;
+      }
+    }
+    out.computeBoundingBox();
+    if (!out.boundingBox || out.boundingBox.isEmpty()) return null;
     out.computeVertexNormals();
     return out;
   } catch {

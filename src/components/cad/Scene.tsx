@@ -42,11 +42,77 @@ const PITCH_LIMIT = Math.PI / 2 - 0.05;
 
 /** First-person twin-stick rig. */
 function FlyRig() {
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const yaw = useRef(0);
   const pitch = useRef(-0.18);
   const pos = useRef(new THREE.Vector3(0, 2.2, 9));
   const euler = useMemo(() => new THREE.Euler(0, 0, 0, "YXZ"), []);
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const pointers = new Map<number, { x: number; y: number }>();
+    let pinchDistance = 0;
+    let pinchCenter = { x: 0, y: 0 };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        if (!a || !b) return;
+        pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
+        pinchCenter = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      }
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const previous = pointers.get(event.pointerId);
+      if (!previous) return;
+      event.preventDefault();
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+      if (pointers.size === 1) {
+        yaw.current -= (event.clientX - previous.x) * 0.006;
+        pitch.current = THREE.MathUtils.clamp(
+          pitch.current - (event.clientY - previous.y) * 0.006,
+          -PITCH_LIMIT,
+          PITCH_LIMIT,
+        );
+        return;
+      }
+
+      const [a, b] = [...pointers.values()];
+      if (!a || !b) return;
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+
+      // Pinch out moves forward; a two-finger swipe pans the camera.
+      pos.current.addScaledVector(forward, (distance - pinchDistance) * 0.012);
+      pos.current.addScaledVector(right, -(center.x - pinchCenter.x) * 0.006);
+      pos.current.addScaledVector(up, (center.y - pinchCenter.y) * 0.006);
+      pinchDistance = distance;
+      pinchCenter = center;
+    };
+
+    const onPointerEnd = (event: PointerEvent) => {
+      pointers.delete(event.pointerId);
+      if (pointers.size < 2) pinchDistance = 0;
+    };
+
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove, { passive: false });
+    canvas.addEventListener("pointerup", onPointerEnd);
+    canvas.addEventListener("pointercancel", onPointerEnd);
+    return () => {
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerEnd);
+      canvas.removeEventListener("pointercancel", onPointerEnd);
+    };
+  }, [camera, gl]);
 
   useFrame((_, raw) => {
     const dt = Math.min(raw, 0.05);
@@ -547,7 +613,12 @@ export function Scene(props: SceneProps) {
 
       {view === "fly" && <FlyRig />}
       {view === "orbit" && (
-        <OrbitControls makeDefault enableDamping dampingFactor={0.12} />
+        <OrbitControls
+          makeDefault
+          enableDamping
+          dampingFactor={0.12}
+          touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+        />
       )}
       {view === "top" && (
         <>
@@ -558,7 +629,12 @@ export function Scene(props: SceneProps) {
             near={0.1}
             far={500}
           />
-          <MapControls makeDefault enableRotate={false} screenSpacePanning />
+          <MapControls
+            makeDefault
+            enableRotate={false}
+            screenSpacePanning
+            touches={{ ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN }}
+          />
         </>
       )}
 
