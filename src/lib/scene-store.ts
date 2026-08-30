@@ -1,4 +1,4 @@
-import type { PlacedObject } from "@/components/cad/state";
+import { hydrateObject, type PlacedObject } from "@/components/cad/state";
 
 const PREFIX = "vectorbay:scene:";
 const AUTO = "vectorbay:auto";
