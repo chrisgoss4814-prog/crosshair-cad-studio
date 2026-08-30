@@ -18,12 +18,14 @@ import {
   centerPoint,
   computeCenterPoint,
   controls,
+  flyFocus,
   geometryOf,
   meshRegistry,
   motionOffset,
   publishCenter,
   roundTo,
   sceneRefs,
+  selectionFocusState,
   SNAP,
   speedFactor,
   tapTarget,
@@ -40,23 +42,52 @@ const LOOK_SPEED = 2.4;
 const LIFT_SPEED = 5;
 const PITCH_LIMIT = Math.PI / 2 - 0.05;
 
-/** First-person twin-stick rig. */
+/** First-person twin-stick rig with swipe inertia, double-tap focus, and
+ *  distance-scaled two-finger panning. */
 function FlyRig() {
   const { camera, gl } = useThree();
   const yaw = useRef(0);
   const pitch = useRef(-0.18);
   const pos = useRef(new THREE.Vector3(0, 2.2, 9));
   const euler = useMemo(() => new THREE.Euler(0, 0, 0, "YXZ"), []);
+  /** Swipe fling velocity (radians/second of yaw/pitch). */
+  const spin = useRef({ x: 0, y: 0 });
+  /** Active focus glide: ease position + aim toward the target point. */
+  const focus = useRef<{ target: THREE.Vector3; dest: THREE.Vector3 } | null>(null);
+  const seenFocusNonce = useRef(0);
 
   useEffect(() => {
     const canvas = gl.domElement;
-    const pointers = new Map<number, { x: number; y: number }>();
+    const pointers = new Map<number, { x: number; y: number; t: number }>();
     let pinchDistance = 0;
     let pinchCenter = { x: 0, y: 0 };
+    let lastTapAt = 0;
+
+    const beginFocus = () => {
+      if (!selectionFocusState.valid) return;
+      const p = selectionFocusState.point;
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      focus.current = {
+        target: p.clone(),
+        dest: p.clone().addScaledVector(dir, -5),
+      };
+      spin.current = { x: 0, y: 0 };
+    };
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.pointerType !== "touch") return;
-      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      pointers.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+        t: performance.now(),
+      });
+      spin.current = { x: 0, y: 0 };
+      focus.current = null;
+      if (pointers.size === 1) {
+        const now = performance.now();
+        if (now - lastTapAt < 300) beginFocus();
+        lastTapAt = now;
+      }
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         if (!a || !b) return;
@@ -69,15 +100,24 @@ function FlyRig() {
       const previous = pointers.get(event.pointerId);
       if (!previous) return;
       event.preventDefault();
-      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      const now = performance.now();
+      const dtMs = Math.max(1, now - previous.t);
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, t: now });
 
       if (pointers.size === 1) {
-        yaw.current -= (event.clientX - previous.x) * 0.006;
+        const dx = event.clientX - previous.x;
+        const dy = event.clientY - previous.y;
+        yaw.current -= dx * 0.006;
         pitch.current = THREE.MathUtils.clamp(
-          pitch.current - (event.clientY - previous.y) * 0.006,
+          pitch.current - dy * 0.006,
           -PITCH_LIMIT,
           PITCH_LIMIT,
         );
+        // Track swipe velocity so release can fling with inertia.
+        spin.current = {
+          x: (-dx * 0.006 * 1000) / dtMs,
+          y: (-dy * 0.006 * 1000) / dtMs,
+        };
         return;
       }
 
@@ -89,17 +129,29 @@ function FlyRig() {
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
 
-      // Pinch out moves forward; a two-finger swipe pans the camera.
-      pos.current.addScaledVector(forward, (distance - pinchDistance) * 0.012);
-      pos.current.addScaledVector(right, -(center.x - pinchCenter.x) * 0.006);
-      pos.current.addScaledVector(up, (center.y - pinchCenter.y) * 0.006);
+      // Pan/pinch speed scales with distance to the work point so the world
+      // tracks under the fingers whether zoomed in close or far away.
+      const reach = THREE.MathUtils.clamp(
+        pos.current.distanceTo(centerPoint) * 0.004,
+        0.002,
+        0.06,
+      );
+      pos.current.addScaledVector(forward, (distance - pinchDistance) * reach * 2);
+      pos.current.addScaledVector(right, -(center.x - pinchCenter.x) * reach);
+      pos.current.addScaledVector(up, (center.y - pinchCenter.y) * reach);
       pinchDistance = distance;
       pinchCenter = center;
     };
 
     const onPointerEnd = (event: PointerEvent) => {
+      const rec = pointers.get(event.pointerId);
       pointers.delete(event.pointerId);
       if (pointers.size < 2) pinchDistance = 0;
+      // A finger that stopped moving before lift-off should not fling.
+      if (rec && performance.now() - rec.t > 90) spin.current = { x: 0, y: 0 };
+      const cap = 6;
+      spin.current.x = THREE.MathUtils.clamp(spin.current.x, -cap, cap);
+      spin.current.y = THREE.MathUtils.clamp(spin.current.y, -cap, cap);
     };
 
     canvas.addEventListener("pointerdown", onPointerDown);
@@ -116,6 +168,45 @@ function FlyRig() {
 
   useFrame((_, raw) => {
     const dt = Math.min(raw, 0.05);
+
+    // Consume a HUD "Focus" request.
+    if (flyFocus.nonce !== seenFocusNonce.current) {
+      seenFocusNonce.current = flyFocus.nonce;
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      focus.current = {
+        target: flyFocus.point.clone(),
+        dest: flyFocus.point.clone().addScaledVector(dir, -5),
+      };
+      spin.current = { x: 0, y: 0 };
+    }
+
+    // Swipe inertia with friction.
+    if (Math.abs(spin.current.x) > 0.001 || Math.abs(spin.current.y) > 0.001) {
+      yaw.current += spin.current.x * dt;
+      pitch.current = THREE.MathUtils.clamp(
+        pitch.current + spin.current.y * dt,
+        -PITCH_LIMIT,
+        PITCH_LIMIT,
+      );
+      const decay = Math.exp(-6 * dt);
+      spin.current.x *= decay;
+      spin.current.y *= decay;
+    }
+
+    // Focus glide: ease toward the destination and aim at the target.
+    if (focus.current) {
+      const k = 1 - Math.exp(-6 * dt);
+      pos.current.lerp(focus.current.dest, k);
+      const d = focus.current.target.clone().sub(pos.current);
+      const targetYaw = Math.atan2(-d.x, -d.z);
+      const targetPitch = Math.atan2(d.y, Math.hypot(d.x, d.z));
+      let dyaw = targetYaw - yaw.current;
+      dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+      yaw.current += dyaw * k;
+      pitch.current += (targetPitch - pitch.current) * k;
+      if (pos.current.distanceTo(focus.current.dest) < 0.05) focus.current = null;
+    }
+
     const k = speedFactor();
     const look = k * controls.lookMul;
     const move = k * controls.moveMul;
