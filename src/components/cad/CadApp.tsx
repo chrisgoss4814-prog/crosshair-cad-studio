@@ -2100,20 +2100,28 @@ export function CadApp() {
           </Chip>
         </div>
 
-        {/* Joysticks */}
+        {/* Sticks — gesture mode keeps only the pivot-in-place Look stick */}
         {view === "fly" && sticks && (!focused || collapsed) && (
           <div className="flex items-end justify-between gap-2">
-            <div className="pointer-events-auto">
-              <Joystick
-                label="move"
-                onChange={(x, y) => {
-                  controls.move.x = x;
-                  controls.move.y = y;
-                }}
-              />
-            </div>
+            {nav === "gesture" ? (
+              <div className="pointer-events-none font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-muted-foreground">
+                swipe to fly
+                <br />
+                pinch for depth
+              </div>
+            ) : (
+              <div className="pointer-events-auto">
+                <Joystick
+                  label="move"
+                  onChange={(x, y) => {
+                    controls.move.x = x;
+                    controls.move.y = y;
+                  }}
+                />
+              </div>
+            )}
             <div className="pointer-events-auto flex flex-col gap-1.5">
-              <Btn onClick={() => {}} className="select-none">
+              <Btn onClick={() => {}} className="select-none" hint="lift">
                 <span
                   onPointerDown={() => (controls.lift = 1)}
                   onPointerUp={() => (controls.lift = 0)}
@@ -2123,7 +2131,7 @@ export function CadApp() {
                   ↑
                 </span>
               </Btn>
-              <Btn onClick={() => {}} className="select-none">
+              <Btn onClick={() => {}} className="select-none" hint="lift">
                 <span
                   onPointerDown={() => (controls.lift = -1)}
                   onPointerUp={() => (controls.lift = 0)}
@@ -2136,7 +2144,7 @@ export function CadApp() {
             </div>
             <div className="pointer-events-auto">
               <Joystick
-                label="pivot"
+                label="look"
                 onChange={(x, y) => {
                   controls.look.x = x;
                   controls.look.y = y;
@@ -2145,6 +2153,7 @@ export function CadApp() {
             </div>
           </div>
         )}
+
       </div>
 
       {/* Long-press quick menu */}
