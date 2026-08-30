@@ -265,6 +265,26 @@ function FlyRig({ nav }: { nav: "gesture" | "swipe-look" }) {
     pos.current.addScaledVector(right, controls.move.x * MOVE_SPEED * move * dt);
     pos.current.y += controls.lift * LIFT_SPEED * k * controls.liftMul * dt;
 
+    // Held swipe: keep flying in the screen plane while the finger stays off
+    // its origin; further from the origin = faster.
+    if (navRef.current === "gesture" && drag.current) {
+      const dx = drag.current.x - drag.current.ox;
+      const dy = drag.current.y - drag.current.oy;
+      const mag = Math.hypot(dx, dy);
+      const dead = 14;
+      if (mag > dead) {
+        const ramp = Math.min(1, (mag - dead) / 170) ** 1.5;
+        const screenRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const screenUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        const dir = screenRight
+          .multiplyScalar(dx / mag)
+          .addScaledVector(screenUp, -dy / mag)
+          .normalize();
+        pos.current.addScaledVector(dir, ramp * MOVE_SPEED * move * dt);
+      }
+    }
+
+
     euler.set(pitch.current, yaw.current, 0);
     camera.quaternion.setFromEuler(euler);
     camera.position.copy(pos.current);
