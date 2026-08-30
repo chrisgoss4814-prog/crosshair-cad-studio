@@ -576,12 +576,34 @@ export function CadApp() {
       setObjects((prev) => {
         const target = prev.find((o) => o.id === id);
         if (!target) return prev;
-        const dx = pos[0] - target.position[0];
-        const dy = pos[1] - target.position[1];
-        const dz = pos[2] - target.position[2];
+        let dx = pos[0] - target.position[0];
+        let dy = pos[1] - target.position[1];
+        let dz = pos[2] - target.position[2];
         if (!dx && !dy && !dz) return prev;
         const ids =
           selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id];
+
+        // Solid mode: objects cannot pass through each other. The move is
+        // resolved axis by axis so a blocked object slides along the surface.
+        if (blockOverlap) {
+          const movingBox = new THREE.Box3();
+          for (const o of prev) {
+            if (ids.includes(o.id)) movingBox.union(worldBoxOf(o));
+          }
+          const blockers = prev
+            .filter((o) => !ids.includes(o.id))
+            .map((o) => worldBoxOf(o));
+          const ok = resolveMove(
+            movingBox,
+            new THREE.Vector3(dx, dy, dz),
+            blockers,
+          );
+          dx = ok.x;
+          dy = ok.y;
+          dz = ok.z;
+          if (!dx && !dy && !dz) return prev;
+        }
+
         let moved = prev.map((o) =>
           ids.includes(o.id)
             ? {
@@ -596,7 +618,7 @@ export function CadApp() {
         );
         // Magnetic alignment: a single dragged object softly snaps into
         // perfect line-up with neighbours.
-        if (magnet && ids.length === 1) {
+        if (magnet && ids.length === 1 && !blockOverlap) {
           const target = moved.find((o) => o.id === ids[0]);
           if (target) {
             const box = worldBoxOf(target);
@@ -624,22 +646,12 @@ export function CadApp() {
             }
           }
         }
-        if (blockOverlap) {
-          const others = moved.filter((o) => !ids.includes(o.id));
-          const boxes = others.map((o) => worldBoxOf(o));
-          const hit = moved
-            .filter((o) => ids.includes(o.id))
-            .some((o) => {
-              const b = worldBoxOf(o);
-              return boxes.some((ob) => boxesOverlap(b, ob));
-            });
-          if (hit) return prev;
-        }
         return moved;
       });
     },
     [selectedIds, blockOverlap, magnet, grid],
   );
+
 
   const onTapTarget = useCallback((p: THREE.Vector3, n: THREE.Vector3) => {
     if (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001) {
