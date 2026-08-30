@@ -368,6 +368,7 @@ function ObjectMesh({
   onMeasurePick,
   onTapTarget,
   onCutPick,
+  onLongPress,
 }: {
   o: PlacedObject;
   selected: boolean;
@@ -382,6 +383,7 @@ function ObjectMesh({
   onMeasurePick: (p: THREE.Vector3) => void;
   onTapTarget: (p: THREE.Vector3, n: THREE.Vector3) => void;
   onCutPick: (id: string, p: THREE.Vector3, n: THREE.Vector3) => void;
+  onLongPress: (id: string, x: number, y: number) => void;
 }) {
   const ref = useRef<THREE.Mesh>(null);
   const { camera } = useThree();
@@ -390,6 +392,9 @@ function ObjectMesh({
   const offset = useRef(new THREE.Vector3());
   const hitPoint = useRef(new THREE.Vector3());
   const clock = useRef(0);
+  const pulseClock = useRef(0);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressStart = useRef({ x: 0, y: 0 });
 
   const geometry = useMemo(() => geometryOf(o), [o]);
 
