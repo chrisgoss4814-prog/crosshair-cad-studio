@@ -420,6 +420,8 @@ export function hydrateObject(o: Partial<PlacedObject> & { id: string }): Placed
     taper: 0,
     profile: null,
     ops: [],
+    motion: null,
+
     color: DEFAULT_MATERIAL.color,
     metalness: DEFAULT_MATERIAL.metalness,
     roughness: DEFAULT_MATERIAL.roughness,
