@@ -2006,6 +2006,54 @@ export function CadApp() {
         )}
       </div>
 
+      {/* Long-press quick menu */}
+      {quickMenu && (
+        <div
+          className="absolute z-50 flex items-center gap-1.5 rounded-lg border border-grid-line bg-panel/95 p-1.5 shadow-hud backdrop-blur-md"
+          style={{
+            left: Math.max(8, Math.min(quickMenu.x - 80, window.innerWidth - 260)),
+            top: Math.max(8, quickMenu.y - 60),
+          }}
+        >
+          <Btn
+            onClick={() => {
+              duplicateObjects(objects.filter((o) => o.id === quickMenu.id));
+              setQuickMenu(null);
+            }}
+          >
+            Dup
+          </Btn>
+          <Btn
+            onClick={() => {
+              setSelectedIds([quickMenu.id]);
+              setQuickMenu(null);
+              openCat("edit");
+            }}
+          >
+            Edit
+          </Btn>
+          <Btn
+            onClick={() => {
+              setSelectedIds([quickMenu.id]);
+              setQuickMenu(null);
+              openCat("motion");
+            }}
+          >
+            Motion
+          </Btn>
+          <Btn
+            onClick={() => {
+              setObjects((prev) => prev.filter((o) => o.id !== quickMenu.id));
+              setSelectedIds((prev) => prev.filter((i) => i !== quickMenu.id));
+              setQuickMenu(null);
+            }}
+          >
+            Del
+          </Btn>
+          <Btn onClick={() => setQuickMenu(null)}>✕</Btn>
+        </div>
+      )}
+
       {/* Selection readout */}
       {selectedIds.length > 0 && !focused && (
         <div className="pointer-events-none absolute right-3 top-14 z-40 rounded-md border border-grid-line bg-panel/85 px-2 py-1 font-mono text-[10px] text-muted-foreground backdrop-blur-md">
