@@ -549,7 +549,7 @@ export function CadApp() {
     // Verify the cut leaves something behind before committing it.
     const geoAfter = (() => {
       try {
-        return geometryCount(trial);
+        return geometryOf(trial).getAttribute("position")?.count ?? 0;
       } catch {
         return 0;
       }
