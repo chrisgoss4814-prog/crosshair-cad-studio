@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import { Joystick } from "./Joystick";
 import { AxisHud } from "./AxisHud";
+import { HELP, HELP_ORDER } from "./help";
 import { Scene, type CutPreview } from "./Scene";
 import {
   is2D,
@@ -26,6 +35,7 @@ import {
   makeObject,
   boxesOverlap,
   requestFlyFocus,
+  resolveMove,
   sceneRefs,
   selectionFocusState,
   SNAP,
@@ -98,21 +108,59 @@ const CATS: { id: Cat; label: string; tool: ToolMode | null }[] = [
 const ROT_STEPS = [1, 5, 15, 90];
 const PREFS_KEY = "vb.controls.v1";
 
+/** Long-press any control to read what it does. */
+const HintCtx = createContext<(id: string) => void>(() => {});
+
+function useHint(hint?: string) {
+  const show = useContext(HintCtx);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
+  if (!hint) return {} as Record<string, never>;
+  const clear = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  return {
+    onPointerDown: () => {
+      fired.current = false;
+      clear();
+      timer.current = setTimeout(() => {
+        fired.current = true;
+        show(hint);
+      }, 500);
+    },
+    onPointerUp: clear,
+    onPointerLeave: clear,
+    onPointerCancel: clear,
+    onClickCapture: (e: React.MouseEvent) => {
+      if (fired.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        fired.current = false;
+      }
+    },
+  };
+}
+
 function Chip({
   active,
   onClick,
   children,
   className = "",
+  hint,
 }: {
   active?: boolean;
   onClick: () => void;
   children: React.ReactNode;
   className?: string;
+  hint?: string;
 }) {
+  const hintProps = useHint(hint);
   return (
     <button
       type="button"
       onClick={onClick}
+      {...hintProps}
       className={`rounded-md border px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.12em] transition-colors ${
         active
           ? "border-accent bg-accent/20 text-foreground shadow-glow"
@@ -129,17 +177,21 @@ function Btn({
   children,
   className = "",
   disabled,
+  hint,
 }: {
   onClick: () => void;
   children: React.ReactNode;
   className?: string;
   disabled?: boolean;
+  hint?: string;
 }) {
+  const hintProps = useHint(hint);
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      {...hintProps}
       className={`rounded-md border border-grid-line bg-panel/85 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground backdrop-blur-md transition-colors hover:border-accent/70 disabled:opacity-35 ${className}`}
     >
       {children}
