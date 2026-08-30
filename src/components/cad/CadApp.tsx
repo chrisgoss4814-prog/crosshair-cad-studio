@@ -863,7 +863,8 @@ export function CadApp() {
 
       {/* Shape / form panel */}
       {panel === "shape" && (
-        <div className="pointer-events-auto absolute bottom-52 left-1/2 z-40 max-h-[52vh] w-[min(94vw,360px)] -translate-x-1/2 overflow-y-auto rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
+        <div className="pointer-events-auto absolute right-3 top-14 z-40 max-h-[68vh] w-[min(92vw,340px)] overflow-y-auto rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
+          <button type="button" onClick={() => setPanel("none")} aria-label="close panel" className="float-right -mt-1 rounded-md border border-grid-line px-2 py-0.5 font-mono text-[11px] text-muted-foreground">✕</button>
           <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
             solids
           </p>
@@ -973,7 +974,8 @@ export function CadApp() {
 
       {/* Controls panel */}
       {panel === "settings" && (
-        <div className="pointer-events-auto absolute bottom-52 left-1/2 z-40 w-[min(92vw,340px)] -translate-x-1/2 rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
+        <div className="pointer-events-auto absolute right-3 top-14 z-40 max-h-[68vh] w-[min(92vw,340px)] overflow-y-auto rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
+          <button type="button" onClick={() => setPanel("none")} aria-label="close panel" className="float-right -mt-1 rounded-md border border-grid-line px-2 py-0.5 font-mono text-[11px] text-muted-foreground">✕</button>
           <Slider
             label="speed"
             value={speed}
@@ -1051,7 +1053,8 @@ export function CadApp() {
 
       {/* Style panel */}
       {panel === "style" && (
-        <div className="pointer-events-auto absolute bottom-52 left-1/2 z-40 w-[min(92vw,340px)] -translate-x-1/2 rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
+        <div className="pointer-events-auto absolute right-3 top-14 z-40 max-h-[68vh] w-[min(92vw,340px)] overflow-y-auto rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
+          <button type="button" onClick={() => setPanel("none")} aria-label="close panel" className="float-right -mt-1 rounded-md border border-grid-line px-2 py-0.5 font-mono text-[11px] text-muted-foreground">✕</button>
           <div className="mb-2 flex flex-wrap gap-1.5">
             {SWATCHES.map((c) => (
               <button
