@@ -582,7 +582,7 @@ export function CadApp() {
         if (!dx && !dy && !dz) return prev;
         const ids =
           selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id];
-        const moved = prev.map((o) =>
+        let moved = prev.map((o) =>
           ids.includes(o.id)
             ? {
                 ...o,
@@ -594,6 +594,36 @@ export function CadApp() {
               }
             : o,
         );
+        // Magnetic alignment: a single dragged object softly snaps into
+        // perfect line-up with neighbours.
+        if (magnet && ids.length === 1) {
+          const target = moved.find((o) => o.id === ids[0]);
+          if (target) {
+            const box = worldBoxOf(target);
+            const others = moved
+              .filter((o) => o.id !== target.id)
+              .map((o) => ({ id: o.id, box: worldBoxOf(o) }));
+            const fix = magneticAlign(box, others, Math.max(0.04, grid * 0.12));
+            const c = box.getCenter(new THREE.Vector3());
+            const mdx = (fix.x ?? c.x) - c.x;
+            const mdy = (fix.y ?? c.y) - c.y;
+            const mdz = (fix.z ?? c.z) - c.z;
+            if (mdx || mdy || mdz) {
+              moved = moved.map((o) =>
+                o.id === target.id
+                  ? {
+                      ...o,
+                      position: [
+                        +(o.position[0] + mdx).toFixed(6),
+                        +(o.position[1] + mdy).toFixed(6),
+                        +(o.position[2] + mdz).toFixed(6),
+                      ] as [number, number, number],
+                    }
+                  : o,
+              );
+            }
+          }
+        }
         if (blockOverlap) {
           const others = moved.filter((o) => !ids.includes(o.id));
           const boxes = others.map((o) => worldBoxOf(o));
@@ -608,7 +638,7 @@ export function CadApp() {
         return moved;
       });
     },
-    [selectedIds, blockOverlap],
+    [selectedIds, blockOverlap, magnet, grid],
   );
 
   const onTapTarget = useCallback((p: THREE.Vector3, n: THREE.Vector3) => {
@@ -818,12 +848,14 @@ export function CadApp() {
     }));
   };
 
-  const duplicate = () => {
-    if (!selectedObjects.length) return;
-    const copies = selectedObjects.map((o) => cloneObject(o, snap ? grid : 0.25));
+  const duplicateObjects = (list: PlacedObject[]) => {
+    if (!list.length) return;
+    const copies = list.map((o) => cloneObject(o, snap ? grid : 0.25));
     setObjects((prev) => [...prev, ...copies]);
     setSelectedIds(copies.map((c) => c.id));
   };
+
+  const duplicate = () => duplicateObjects(selectedObjects);
 
   const removeSelected = () => {
     setObjects((prev) => prev.filter((o) => !selectedIds.includes(o.id)));
