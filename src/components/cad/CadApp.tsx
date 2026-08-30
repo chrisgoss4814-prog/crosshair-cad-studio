@@ -1900,7 +1900,10 @@ export function CadApp() {
 
   const focused = cat !== null;
 
+  const helpEntry = helpId ? HELP[helpId] : null;
+
   return (
+    <HintCtx.Provider value={setHelpId}>
     <main className="fixed inset-0 overflow-hidden bg-background text-foreground">
       <h1 className="sr-only">Vector Bay — 3D CAD sketchpad</h1>
 
@@ -2090,7 +2093,7 @@ export function CadApp() {
               key={c.id}
               active={cat === c.id}
               onClick={() => openCat(c.id)}
-              hint={CAT_HELP[c.id]}
+              hint={CAT_HELP[c.id] ?? "step"}
             >
               {c.label}
             </Chip>
@@ -2204,6 +2207,58 @@ export function CadApp() {
         </div>
       )}
 
+      {/* Long-press description popover */}
+      {helpEntry && (
+        <button
+          type="button"
+          onClick={() => setHelpId(null)}
+          className="absolute inset-0 z-[60] flex items-end justify-center bg-background/40 p-4 backdrop-blur-[2px]"
+        >
+          <span className="mb-24 block max-w-[420px] rounded-lg border border-accent/60 bg-panel/95 p-3 text-left shadow-hud">
+            <span className="block font-mono text-[11px] uppercase tracking-[0.18em] text-accent">
+              {helpEntry.title}
+            </span>
+            <span className="mt-1 block font-mono text-[11px] leading-relaxed text-muted-foreground">
+              {helpEntry.body}
+            </span>
+            <span className="mt-2 block font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground/70">
+              tap anywhere to close · long-press any control for its description
+            </span>
+          </span>
+        </button>
+      )}
+
+      {/* Full control guide */}
+      {guideOpen && (
+        <div className="absolute inset-0 z-[60] flex flex-col bg-background/95 p-4 backdrop-blur-md">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-accent">
+              Control guide
+            </span>
+            <Btn onClick={() => setGuideOpen(false)}>Close</Btn>
+          </div>
+          <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+            {HELP_ORDER.map((id) => {
+              const e = HELP[id];
+              if (!e) return null;
+              return (
+                <div
+                  key={id}
+                  className="rounded-md border border-grid-line bg-panel/70 p-2"
+                >
+                  <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground">
+                    {e.title}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                    {e.body}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Selection readout */}
       {selectedIds.length > 0 && !focused && (
         <div className="pointer-events-none absolute right-3 top-14 z-40 rounded-md border border-grid-line bg-panel/85 px-2 py-1 font-mono text-[10px] text-muted-foreground backdrop-blur-md">
@@ -2212,5 +2267,6 @@ export function CadApp() {
         </div>
       )}
     </main>
+    </HintCtx.Provider>
   );
 }
