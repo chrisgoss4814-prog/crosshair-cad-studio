@@ -203,7 +203,7 @@ export function AxisHud({ step }: { step: number }) {
           }`}
         />
       </div>
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 translate-y-3 whitespace-nowrap rounded-md border border-grid-line bg-panel/85 px-2 py-1 font-mono text-[10px] tracking-wider backdrop-blur-sm">
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-12 whitespace-nowrap rounded-md border border-grid-line bg-panel/85 px-2 py-1 font-mono text-[10px] tracking-wider backdrop-blur-sm">
         <span className="text-axis-x">X {c.x.toFixed(3)}</span>
         <span className="text-muted-foreground"> · </span>
         <span className="text-axis-y">Y {c.y.toFixed(3)}</span>
