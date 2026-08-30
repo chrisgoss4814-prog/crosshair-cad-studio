@@ -289,11 +289,22 @@ export function nearestSnapPoint(
 }
 
 /**
+ * Half extent of an axis-aligned box along an arbitrary direction — the
+ * distance from its center to the surface in that direction.
+ */
+export function halfExtentAlong(half: THREE.Vector3, n: THREE.Vector3) {
+  return (
+    Math.abs(n.x) * half.x + Math.abs(n.y) * half.y + Math.abs(n.z) * half.z
+  );
+}
+
+/**
  * Resolve the world point under the screen center.
  *
  * Priority when snapping is on: shape snap point -> object face -> ground
- * plane -> free depth. A face hit offsets by half the placement size along the
- * face normal so cylinders stack into pillars and boxes butt flush.
+ * plane -> free depth. A face hit offsets by the placed shape's true half
+ * extent along the face normal, so it rests exactly on the surface instead of
+ * sinking halfway in.
  */
 export function computeCenterPoint(
   camera: THREE.Camera,
@@ -304,9 +315,12 @@ export function computeCenterPoint(
     snap: boolean;
     grid?: number;
     shapeSnap?: boolean;
+    /** Half extent of the pending shape along a direction (defaults to size/2). */
+    halfFor?: (n: THREE.Vector3) => number;
   },
 ): { point: THREE.Vector3; onSurface: boolean; snapped: boolean } {
   const grid = opts.grid ?? SNAP;
+  const halfFor = opts.halfFor ?? (() => opts.size / 2);
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 
   const meshes = Array.from(meshRegistry.values());
@@ -314,27 +328,26 @@ export function computeCenterPoint(
     const hits = raycaster.intersectObjects(meshes, false);
     const hit = hits[0];
     if (hit && hit.face) {
+      _normal
+        .copy(hit.face.normal)
+        .transformDirection(hit.object.matrixWorld)
+        .normalize();
+      const off = halfFor(_normal);
+
       if (opts.shapeSnap !== false) {
         const near = nearestSnapPoint(hit.point, Math.max(0.4, opts.size * 0.75));
         if (near) {
-          _normal
-            .copy(hit.face.normal)
-            .transformDirection(hit.object.matrixWorld)
-            .normalize();
           return {
-            point: near.clone().addScaledVector(_normal, opts.size / 2),
+            point: near.clone().addScaledVector(_normal, off),
             onSurface: true,
             snapped: true,
           };
         }
       }
 
-      _normal
-        .copy(hit.face.normal)
-        .transformDirection(hit.object.matrixWorld)
-        .normalize();
-      _point.copy(hit.point).addScaledVector(_normal, opts.size / 2);
+      _point.copy(hit.point).addScaledVector(_normal, off);
 
+      // Round only across the face; never along the normal, so contact stays flush.
       const ax = Math.abs(_normal.x);
       const ay = Math.abs(_normal.y);
       const az = Math.abs(_normal.z);
@@ -352,7 +365,7 @@ export function computeCenterPoint(
       return {
         point: new THREE.Vector3(
           roundTo(_point.x, grid),
-          opts.size / 2,
+          halfFor(new THREE.Vector3(0, 1, 0)),
           roundTo(_point.z, grid),
         ),
         onSurface: false,
@@ -372,6 +385,7 @@ export function computeCenterPoint(
   }
   return { point: _point.clone(), onSurface: false, snapped: false };
 }
+
 
 // ---------------------------------------------------------------------------
 // Object helpers
@@ -640,3 +654,53 @@ export function magneticAlign(
   }
   return out;
 }
+
+function overlaps1d(
+  aMin: number,
+  aMax: number,
+  bMin: number,
+  bMax: number,
+  eps: number,
+) {
+  return aMin < bMax - eps && aMax > bMin + eps;
+}
+
+/**
+ * Solid-body move: given a box and a desired delta, return the delta that is
+ * actually allowed so the box never passes through any of `others`. Each axis
+ * is resolved separately, so a blocked object slides along the surface it hit
+ * instead of stopping dead.
+ */
+export function resolveMove(
+  box: THREE.Box3,
+  delta: THREE.Vector3,
+  others: THREE.Box3[],
+  eps = 1e-4,
+): THREE.Vector3 {
+  const cur = box.clone();
+  const out = new THREE.Vector3();
+  const axes = ["x", "y", "z"] as const;
+  for (const k of axes) {
+    const d = delta[k];
+    if (!d) continue;
+    const o1 = k === "x" ? "y" : "x";
+    const o2 = k === "z" ? "y" : "z";
+    let allowed = d;
+    for (const ob of others) {
+      if (!overlaps1d(cur.min[o1], cur.max[o1], ob.min[o1], ob.max[o1], eps)) continue;
+      if (!overlaps1d(cur.min[o2], cur.max[o2], ob.min[o2], ob.max[o2], eps)) continue;
+      if (d > 0) {
+        const gap = ob.min[k] - cur.max[k];
+        if (gap >= -eps) allowed = Math.min(allowed, Math.max(0, gap - eps));
+      } else {
+        const gap = ob.max[k] - cur.min[k];
+        if (gap <= eps) allowed = Math.max(allowed, Math.min(0, gap + eps));
+      }
+    }
+    out[k] = allowed;
+    cur.min[k] += allowed;
+    cur.max[k] += allowed;
+  }
+  return out;
+}
+

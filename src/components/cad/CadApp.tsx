@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import { Joystick } from "./Joystick";
 import { AxisHud } from "./AxisHud";
+import { HELP, HELP_ORDER } from "./help";
 import { Scene, type CutPreview } from "./Scene";
 import {
   is2D,
@@ -26,6 +35,7 @@ import {
   makeObject,
   boxesOverlap,
   requestFlyFocus,
+  resolveMove,
   sceneRefs,
   selectionFocusState,
   SNAP,
@@ -95,24 +105,76 @@ const CATS: { id: Cat; label: string; tool: ToolMode | null }[] = [
   { id: "files", label: "Files", tool: null },
 ];
 
+const CAT_HELP: Record<string, string> = {
+  move: "nav",
+  place: "place",
+  edit: "multi",
+  stretch: "stretchAxes",
+  cut: "cut",
+  snap: "solid",
+  motion: "motion",
+  style: "style",
+  measure: "measure",
+  ai: "ai",
+  files: "files",
+};
+
 const ROT_STEPS = [1, 5, 15, 90];
 const PREFS_KEY = "vb.controls.v1";
+
+/** Long-press any control to read what it does. */
+const HintCtx = createContext<(id: string) => void>(() => {});
+
+function useHint(hint?: string) {
+  const show = useContext(HintCtx);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
+  if (!hint) return {} as Record<string, never>;
+  const clear = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  return {
+    onPointerDown: () => {
+      fired.current = false;
+      clear();
+      timer.current = setTimeout(() => {
+        fired.current = true;
+        show(hint);
+      }, 500);
+    },
+    onPointerUp: clear,
+    onPointerLeave: clear,
+    onPointerCancel: clear,
+    onClickCapture: (e: React.MouseEvent) => {
+      if (fired.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        fired.current = false;
+      }
+    },
+  };
+}
 
 function Chip({
   active,
   onClick,
   children,
   className = "",
+  hint,
 }: {
   active?: boolean;
   onClick: () => void;
   children: React.ReactNode;
   className?: string;
+  hint?: string;
 }) {
+  const hintProps = useHint(hint);
   return (
     <button
       type="button"
       onClick={onClick}
+      {...hintProps}
       className={`rounded-md border px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.12em] transition-colors ${
         active
           ? "border-accent bg-accent/20 text-foreground shadow-glow"
@@ -129,17 +191,21 @@ function Btn({
   children,
   className = "",
   disabled,
+  hint,
 }: {
   onClick: () => void;
   children: React.ReactNode;
   className?: string;
   disabled?: boolean;
+  hint?: string;
 }) {
+  const hintProps = useHint(hint);
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      {...hintProps}
       className={`rounded-md border border-grid-line bg-panel/85 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground backdrop-blur-md transition-colors hover:border-accent/70 disabled:opacity-35 ${className}`}
     >
       {children}
@@ -307,6 +373,11 @@ export function CadApp() {
   const [cat, setCat] = useState<Cat | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [sticks, setSticks] = useState(true);
+  const [nav, setNav] = useState<"gesture" | "swipe-look">("gesture");
+  const [helpId, setHelpId] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const placeHold = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const placeFired = useRef(false);
   const [kind, setKind] = useState<ShapeKind>("box");
   const [size, setSize] = useState(1);
   const [stretch, setStretch] = useState<[number, number, number]>([1, 1, 1]);
@@ -576,12 +647,34 @@ export function CadApp() {
       setObjects((prev) => {
         const target = prev.find((o) => o.id === id);
         if (!target) return prev;
-        const dx = pos[0] - target.position[0];
-        const dy = pos[1] - target.position[1];
-        const dz = pos[2] - target.position[2];
+        let dx = pos[0] - target.position[0];
+        let dy = pos[1] - target.position[1];
+        let dz = pos[2] - target.position[2];
         if (!dx && !dy && !dz) return prev;
         const ids =
           selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id];
+
+        // Solid mode: objects cannot pass through each other. The move is
+        // resolved axis by axis so a blocked object slides along the surface.
+        if (blockOverlap) {
+          const movingBox = new THREE.Box3();
+          for (const o of prev) {
+            if (ids.includes(o.id)) movingBox.union(worldBoxOf(o));
+          }
+          const blockers = prev
+            .filter((o) => !ids.includes(o.id))
+            .map((o) => worldBoxOf(o));
+          const ok = resolveMove(
+            movingBox,
+            new THREE.Vector3(dx, dy, dz),
+            blockers,
+          );
+          dx = ok.x;
+          dy = ok.y;
+          dz = ok.z;
+          if (!dx && !dy && !dz) return prev;
+        }
+
         let moved = prev.map((o) =>
           ids.includes(o.id)
             ? {
@@ -596,7 +689,7 @@ export function CadApp() {
         );
         // Magnetic alignment: a single dragged object softly snaps into
         // perfect line-up with neighbours.
-        if (magnet && ids.length === 1) {
+        if (magnet && ids.length === 1 && !blockOverlap) {
           const target = moved.find((o) => o.id === ids[0]);
           if (target) {
             const box = worldBoxOf(target);
@@ -624,22 +717,12 @@ export function CadApp() {
             }
           }
         }
-        if (blockOverlap) {
-          const others = moved.filter((o) => !ids.includes(o.id));
-          const boxes = others.map((o) => worldBoxOf(o));
-          const hit = moved
-            .filter((o) => ids.includes(o.id))
-            .some((o) => {
-              const b = worldBoxOf(o);
-              return boxes.some((ob) => boxesOverlap(b, ob));
-            });
-          if (hit) return prev;
-        }
         return moved;
       });
     },
     [selectedIds, blockOverlap, magnet, grid],
   );
+
 
   const onTapTarget = useCallback((p: THREE.Vector3, n: THREE.Vector3) => {
     if (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001) {
@@ -800,12 +883,19 @@ export function CadApp() {
 
   const nudge = (axis: 0 | 1 | 2, dir: 1 | -1) => {
     const amount = (dragStep > 0 ? dragStep : step) * dir;
-    updateSelected((o) => {
-      const position = [...o.position] as [number, number, number];
-      position[axis] = +((position[axis] ?? 0) + amount).toFixed(6);
-      return { ...o, position };
-    });
+    const id = selectedIds[0];
+    if (!id) return;
+    const delta: [number, number, number] = [0, 0, 0];
+    delta[axis] = amount;
+    const first = objects.find((o) => o.id === id);
+    if (!first) return;
+    handleMove(id, [
+      first.position[0] + delta[0],
+      first.position[1] + delta[1],
+      first.position[2] + delta[2],
+    ]);
   };
+
 
   const stretchSelected = (axis: 0 | 1 | 2, dir: 1 | -1) => {
     updateSelected((o) => {
@@ -1150,6 +1240,27 @@ export function CadApp() {
       case "move":
         return (
           <>
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              <Chip
+                active={nav === "gesture"}
+                onClick={() => setNav("gesture")}
+                hint="nav"
+              >
+                Swipe fly
+              </Chip>
+              <Chip
+                active={nav === "swipe-look"}
+                onClick={() => setNav("swipe-look")}
+                hint="nav"
+              >
+                Swipe look
+              </Chip>
+            </div>
+            <p className="mb-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+              {nav === "gesture"
+                ? "Swipe any direction to fly that way; hold your finger there to keep going. Pinch moves forward and back. Use the Look stick to pivot in place."
+                : "Swipe rotates the view; two fingers pan and pinch."}
+            </p>
             <Slider
               label="speed"
               value={speed}
@@ -1354,13 +1465,13 @@ export function CadApp() {
               >
                 {dragPlane === "facing" ? "Face" : "Horz"}
               </Chip>
-              <Btn onClick={duplicate} disabled={!selectedIds.length}>
+              <Btn onClick={duplicate} disabled={!selectedIds.length} hint="dup">
                 Dup
               </Btn>
-              <Btn onClick={groupSelected} disabled={selectedIds.length < 2}>
+              <Btn onClick={groupSelected} disabled={selectedIds.length < 2} hint="group">
                 Group
               </Btn>
-              <Btn onClick={ungroupSelected} disabled={!selectedIds.length}>
+              <Btn onClick={ungroupSelected} disabled={!selectedIds.length} hint="ungroup">
                 Ungrp
               </Btn>
               <Btn onClick={() => booleanSelected("union")} disabled={selectedIds.length < 2}>
@@ -1369,8 +1480,8 @@ export function CadApp() {
               <Btn onClick={() => booleanSelected("subtract")} disabled={selectedIds.length < 2}>
                 Sub
               </Btn>
-              <Btn onClick={undoLastCut}>Uncut</Btn>
-              <Btn onClick={removeSelected} disabled={!selectedIds.length}>
+              <Btn onClick={undoLastCut} hint="uncut">Uncut</Btn>
+              <Btn onClick={removeSelected} disabled={!selectedIds.length} hint="del">
                 Del
               </Btn>
               <Btn
@@ -1497,7 +1608,7 @@ export function CadApp() {
             <div className="flex flex-wrap items-center gap-1.5">
               {cutPick ? (
                 <>
-                  <Btn onClick={applyCut}>Apply cut</Btn>
+                  <Btn onClick={applyCut} hint="cut">Apply cut</Btn>
                   <Btn onClick={() => setCutPick(null)}>Cancel</Btn>
                 </>
               ) : (
@@ -1505,7 +1616,7 @@ export function CadApp() {
                   Tap the face you want to cut into.
                 </span>
               )}
-              <Btn onClick={undoLastCut}>Undo cut</Btn>
+              <Btn onClick={undoLastCut} hint="uncut">Undo cut</Btn>
             </div>
           </>
         );
@@ -1514,29 +1625,43 @@ export function CadApp() {
         return (
           <>
             <div className="mb-1.5 flex flex-wrap gap-1.5">
-              <Chip active={snap} onClick={() => setSnap((s) => !s)}>
+              <Chip active={snap} onClick={() => setSnap((s) => !s)} hint="gridSnap">
                 Grid snap {snap ? "on" : "off"}
               </Chip>
-              <Chip active={shapeSnap} onClick={() => setShapeSnap((s) => !s)}>
+              <Chip
+                active={shapeSnap}
+                onClick={() => setShapeSnap((s) => !s)}
+                hint="shapeSnap"
+              >
                 Shape snap {shapeSnap ? "on" : "off"}
               </Chip>
-              <Chip active={blockOverlap} onClick={() => setBlockOverlap((b) => !b)}>
-                {blockOverlap ? "Block overlap" : "Allow overlap"}
+              <Chip
+                active={blockOverlap}
+                onClick={() => setBlockOverlap((b) => !b)}
+                hint="solid"
+              >
+                {blockOverlap ? "Solid" : "Ghost"}
               </Chip>
-              <Chip active={showGuides} onClick={() => setShowGuides((g) => !g)}>
+              <Chip
+                active={showGuides}
+                onClick={() => setShowGuides((g) => !g)}
+                hint="guides"
+              >
                 Align guides {showGuides ? "on" : "off"}
               </Chip>
-              <Chip active={magnet} onClick={() => setMagnet((m) => !m)}>
+              <Chip active={magnet} onClick={() => setMagnet((m) => !m)} hint="magnet">
                 Magnet {magnet ? "on" : "off"}
               </Chip>
-              <Chip active={!!tapPoint} onClick={clearTap}>
+              <Chip active={!!tapPoint} onClick={clearTap} hint="tapTarget">
                 {tapPoint ? "Clear tap target" : "No tap target"}
               </Chip>
             </div>
             {stepRow}
             <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
               Grid snap rounds to the active step ({step}m). Shape snap pulls to
-              corners, edge midpoints and face centers of nearby objects.
+              corners, edge midpoints and face centers of nearby objects. Tap a
+              face to set a target — the next shape rests on that surface.
+              Solid mode stops objects passing through each other.
               {alignedAxes.length
                 ? ` Selection lines up on ${alignedAxes.join(", ")}.`
                 : ""}
@@ -1777,7 +1902,10 @@ export function CadApp() {
 
   const focused = cat !== null;
 
+  const helpEntry = helpId ? HELP[helpId] : null;
+
   return (
+    <HintCtx.Provider value={setHelpId}>
     <main className="fixed inset-0 overflow-hidden bg-background text-foreground">
       <h1 className="sr-only">Vector Bay — 3D CAD sketchpad</h1>
 
@@ -1789,6 +1917,7 @@ export function CadApp() {
         <Scene
           objects={objects}
           view={view}
+          nav={nav}
           tool={tool}
           ghostSpec={ghostSpec}
           ghostScale={stretch}
@@ -1854,19 +1983,28 @@ export function CadApp() {
         <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3">
           <div className="pointer-events-auto flex gap-1.5">
             {VIEWS.map((v) => (
-              <Chip key={v.id} active={view === v.id} onClick={() => setView(v.id)}>
+              <Chip
+                key={v.id}
+                active={view === v.id}
+                onClick={() => setView(v.id)}
+                hint="view"
+              >
                 {v.label}
               </Chip>
             ))}
           </div>
           <div className="pointer-events-auto flex gap-1.5">
-            <Chip active={precision} onClick={() => setPrecision((p) => !p)}>
+            <Chip
+              active={precision}
+              onClick={() => setPrecision((p) => !p)}
+              hint="fine"
+            >
               Fine {precision ? "on" : "off"}
             </Chip>
-            <Chip active={snap} onClick={() => setSnap((s) => !s)}>
+            <Chip active={snap} onClick={() => setSnap((s) => !s)} hint="gridSnap">
               Snap {snap ? "on" : "off"}
             </Chip>
-            <Btn onClick={undo} disabled={!objects.length}>
+            <Btn onClick={undo} disabled={!objects.length} hint="undo">
               Undo
             </Btn>
           </div>
@@ -1926,6 +2064,22 @@ export function CadApp() {
                 <button
                   type="button"
                   onClick={place}
+                  onPointerDown={() => {
+                    placeHold.current = setTimeout(() => {
+                      placeFired.current = true;
+                      setHelpId("place");
+                    }, 500);
+                  }}
+                  onPointerUp={() => {
+                    if (placeHold.current) clearTimeout(placeHold.current);
+                  }}
+                  onClickCapture={(e) => {
+                    if (placeFired.current) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      placeFired.current = false;
+                    }
+                  }}
                   className="rounded-full border border-accent bg-accent/25 px-7 py-3 font-mono text-sm uppercase tracking-[0.2em] text-foreground shadow-glow backdrop-blur-md active:scale-95"
                 >
                   {armed ? "Place here" : "Add"}
@@ -1936,7 +2090,7 @@ export function CadApp() {
                   </Btn>
                 )}
                 {!armed && objects.length > 0 && (
-                  <Btn onClick={repeat} className="rounded-full">
+                  <Btn onClick={repeat} className="rounded-full" hint="repeat">
                     Repeat
                   </Btn>
                 )}
@@ -1953,26 +2107,42 @@ export function CadApp() {
         {/* Category bar */}
         <div className="pointer-events-auto mx-auto flex w-full max-w-[520px] gap-1.5 overflow-x-auto rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
           {CATS.map((c) => (
-            <Chip key={c.id} active={cat === c.id} onClick={() => openCat(c.id)}>
+            <Chip
+              key={c.id}
+              active={cat === c.id}
+              onClick={() => openCat(c.id)}
+              hint={CAT_HELP[c.id] ?? "step"}
+            >
               {c.label}
             </Chip>
           ))}
+          <Chip active={guideOpen} onClick={() => setGuideOpen(true)}>
+            ? Guide
+          </Chip>
         </div>
 
-        {/* Joysticks */}
+        {/* Sticks — gesture mode keeps only the pivot-in-place Look stick */}
         {view === "fly" && sticks && (!focused || collapsed) && (
           <div className="flex items-end justify-between gap-2">
-            <div className="pointer-events-auto">
-              <Joystick
-                label="move"
-                onChange={(x, y) => {
-                  controls.move.x = x;
-                  controls.move.y = y;
-                }}
-              />
-            </div>
+            {nav === "gesture" ? (
+              <div className="pointer-events-none font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-muted-foreground">
+                swipe to fly
+                <br />
+                pinch for depth
+              </div>
+            ) : (
+              <div className="pointer-events-auto">
+                <Joystick
+                  label="move"
+                  onChange={(x, y) => {
+                    controls.move.x = x;
+                    controls.move.y = y;
+                  }}
+                />
+              </div>
+            )}
             <div className="pointer-events-auto flex flex-col gap-1.5">
-              <Btn onClick={() => {}} className="select-none">
+              <Btn onClick={() => {}} className="select-none" hint="lift">
                 <span
                   onPointerDown={() => (controls.lift = 1)}
                   onPointerUp={() => (controls.lift = 0)}
@@ -1982,7 +2152,7 @@ export function CadApp() {
                   ↑
                 </span>
               </Btn>
-              <Btn onClick={() => {}} className="select-none">
+              <Btn onClick={() => {}} className="select-none" hint="lift">
                 <span
                   onPointerDown={() => (controls.lift = -1)}
                   onPointerUp={() => (controls.lift = 0)}
@@ -1995,7 +2165,7 @@ export function CadApp() {
             </div>
             <div className="pointer-events-auto">
               <Joystick
-                label="pivot"
+                label="look"
                 onChange={(x, y) => {
                   controls.look.x = x;
                   controls.look.y = y;
@@ -2004,6 +2174,7 @@ export function CadApp() {
             </div>
           </div>
         )}
+
       </div>
 
       {/* Long-press quick menu */}
@@ -2054,6 +2225,58 @@ export function CadApp() {
         </div>
       )}
 
+      {/* Long-press description popover */}
+      {helpEntry && (
+        <button
+          type="button"
+          onClick={() => setHelpId(null)}
+          className="absolute inset-0 z-[60] flex items-end justify-center bg-background/40 p-4 backdrop-blur-[2px]"
+        >
+          <span className="mb-24 block max-w-[420px] rounded-lg border border-accent/60 bg-panel/95 p-3 text-left shadow-hud">
+            <span className="block font-mono text-[11px] uppercase tracking-[0.18em] text-accent">
+              {helpEntry.title}
+            </span>
+            <span className="mt-1 block font-mono text-[11px] leading-relaxed text-muted-foreground">
+              {helpEntry.body}
+            </span>
+            <span className="mt-2 block font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground/70">
+              tap anywhere to close · long-press any control for its description
+            </span>
+          </span>
+        </button>
+      )}
+
+      {/* Full control guide */}
+      {guideOpen && (
+        <div className="absolute inset-0 z-[60] flex flex-col bg-background/95 p-4 backdrop-blur-md">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-accent">
+              Control guide
+            </span>
+            <Btn onClick={() => setGuideOpen(false)}>Close</Btn>
+          </div>
+          <div className="flex-1 space-y-2 overflow-y-auto pr-1">
+            {HELP_ORDER.map((id) => {
+              const e = HELP[id];
+              if (!e) return null;
+              return (
+                <div
+                  key={id}
+                  className="rounded-md border border-grid-line bg-panel/70 p-2"
+                >
+                  <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground">
+                    {e.title}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                    {e.body}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Selection readout */}
       {selectedIds.length > 0 && !focused && (
         <div className="pointer-events-none absolute right-3 top-14 z-40 rounded-md border border-grid-line bg-panel/85 px-2 py-1 font-mono text-[10px] text-muted-foreground backdrop-blur-md">
@@ -2062,5 +2285,6 @@ export function CadApp() {
         </div>
       )}
     </main>
+    </HintCtx.Provider>
   );
 }

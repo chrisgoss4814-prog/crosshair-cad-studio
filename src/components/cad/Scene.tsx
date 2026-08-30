@@ -20,6 +20,7 @@ import {
   controls,
   flyFocus,
   geometryOf,
+  halfExtentAlong,
   meshRegistry,
   motionOffset,
   publishCenter,
@@ -42,9 +43,18 @@ const LOOK_SPEED = 2.4;
 const LIFT_SPEED = 5;
 const PITCH_LIMIT = Math.PI / 2 - 0.05;
 
-/** First-person twin-stick rig with swipe inertia, double-tap focus, and
- *  distance-scaled two-finger panning. */
-function FlyRig() {
+/**
+ * First-person rig.
+ *
+ * nav="gesture" (default): one finger swipes to fly in the screen plane and
+ * keeps flying while the finger is held off-center; two-finger pinch moves
+ * strictly forward/back. Rotation comes from the single Look stick, pivoting
+ * in place.
+ *
+ * nav="swipe-look": legacy behaviour — one finger rotates with inertia and two
+ * fingers pan + pinch.
+ */
+function FlyRig({ nav }: { nav: "gesture" | "swipe-look" }) {
   const { camera, gl } = useThree();
   const yaw = useRef(0);
   const pitch = useRef(-0.18);
@@ -52,9 +62,13 @@ function FlyRig() {
   const euler = useMemo(() => new THREE.Euler(0, 0, 0, "YXZ"), []);
   /** Swipe fling velocity (radians/second of yaw/pitch). */
   const spin = useRef({ x: 0, y: 0 });
+  /** Held one-finger drag: origin and current point, in screen px. */
+  const drag = useRef<{ ox: number; oy: number; x: number; y: number } | null>(null);
   /** Active focus glide: ease position + aim toward the target point. */
   const focus = useRef<{ target: THREE.Vector3; dest: THREE.Vector3 } | null>(null);
   const seenFocusNonce = useRef(0);
+  const navRef = useRef(nav);
+  navRef.current = nav;
 
   useEffect(() => {
     const canvas = gl.domElement;
@@ -72,6 +86,7 @@ function FlyRig() {
         dest: p.clone().addScaledVector(dir, -5),
       };
       spin.current = { x: 0, y: 0 };
+      drag.current = null;
     };
 
     const onPointerDown = (event: PointerEvent) => {
@@ -87,8 +102,15 @@ function FlyRig() {
         const now = performance.now();
         if (now - lastTapAt < 300) beginFocus();
         lastTapAt = now;
+        drag.current = {
+          ox: event.clientX,
+          oy: event.clientY,
+          x: event.clientX,
+          y: event.clientY,
+        };
       }
       if (pointers.size === 2) {
+        drag.current = null;
         const [a, b] = [...pointers.values()];
         if (!a || !b) return;
         pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
@@ -105,6 +127,13 @@ function FlyRig() {
       pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, t: now });
 
       if (pointers.size === 1) {
+        if (navRef.current === "gesture") {
+          if (drag.current) {
+            drag.current.x = event.clientX;
+            drag.current.y = event.clientY;
+          }
+          return;
+        }
         const dx = event.clientX - previous.x;
         const dy = event.clientY - previous.y;
         yaw.current -= dx * 0.006;
@@ -129,16 +158,18 @@ function FlyRig() {
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
 
-      // Pan/pinch speed scales with distance to the work point so the world
-      // tracks under the fingers whether zoomed in close or far away.
+      // Pinch speed scales with distance to the work point so the world tracks
+      // under the fingers whether zoomed in close or far away.
       const reach = THREE.MathUtils.clamp(
         pos.current.distanceTo(centerPoint) * 0.004,
         0.002,
         0.06,
       );
       pos.current.addScaledVector(forward, (distance - pinchDistance) * reach * 2);
-      pos.current.addScaledVector(right, -(center.x - pinchCenter.x) * reach);
-      pos.current.addScaledVector(up, (center.y - pinchCenter.y) * reach);
+      if (navRef.current !== "gesture") {
+        pos.current.addScaledVector(right, -(center.x - pinchCenter.x) * reach);
+        pos.current.addScaledVector(up, (center.y - pinchCenter.y) * reach);
+      }
       pinchDistance = distance;
       pinchCenter = center;
     };
@@ -147,6 +178,7 @@ function FlyRig() {
       const rec = pointers.get(event.pointerId);
       pointers.delete(event.pointerId);
       if (pointers.size < 2) pinchDistance = 0;
+      if (pointers.size === 0) drag.current = null;
       // A finger that stopped moving before lift-off should not fling.
       if (rec && performance.now() - rec.t > 90) spin.current = { x: 0, y: 0 };
       const cap = 6;
@@ -165,6 +197,7 @@ function FlyRig() {
       canvas.removeEventListener("pointercancel", onPointerEnd);
     };
   }, [camera, gl]);
+
 
   useFrame((_, raw) => {
     const dt = Math.min(raw, 0.05);
@@ -232,6 +265,26 @@ function FlyRig() {
     pos.current.addScaledVector(right, controls.move.x * MOVE_SPEED * move * dt);
     pos.current.y += controls.lift * LIFT_SPEED * k * controls.liftMul * dt;
 
+    // Held swipe: keep flying in the screen plane while the finger stays off
+    // its origin; further from the origin = faster.
+    if (navRef.current === "gesture" && drag.current) {
+      const dx = drag.current.x - drag.current.ox;
+      const dy = drag.current.y - drag.current.oy;
+      const mag = Math.hypot(dx, dy);
+      const dead = 14;
+      if (mag > dead) {
+        const ramp = Math.min(1, (mag - dead) / 170) ** 1.5;
+        const screenRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        const screenUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+        const dir = screenRight
+          .multiplyScalar(dx / mag)
+          .addScaledVector(screenUp, -dy / mag)
+          .normalize();
+        pos.current.addScaledVector(dir, ramp * MOVE_SPEED * move * dt);
+      }
+    }
+
+
     euler.set(pitch.current, yaw.current, 0);
     camera.quaternion.setFromEuler(euler);
     camera.position.copy(pos.current);
@@ -247,16 +300,42 @@ function CenterProbe({
   snap,
   grid,
   shapeSnap,
+  ghostSpec,
+  ghostScale,
 }: {
   depth: number;
   size: number;
   snap: boolean;
   grid: number;
   shapeSnap: boolean;
+  ghostSpec: GeometrySpec;
+  ghostScale: [number, number, number];
 }) {
   const { camera, size: viewport } = useThree();
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const accum = useRef(0);
+
+  /** Half size of the shape about to be placed, in world units. */
+  const half = useMemo(() => {
+    const geo = buildGeometry(ghostSpec);
+    geo.computeBoundingBox();
+    const b = geo.boundingBox;
+    const v = new THREE.Vector3(size / 2, size / 2, size / 2);
+    if (b) {
+      v.set(
+        Math.max(Math.abs(b.min.x), Math.abs(b.max.x)) * (ghostScale[0] || 1),
+        Math.max(Math.abs(b.min.y), Math.abs(b.max.y)) * (ghostScale[1] || 1),
+        Math.max(Math.abs(b.min.z), Math.abs(b.max.z)) * (ghostScale[2] || 1),
+      );
+    }
+    geo.dispose();
+    return v;
+  }, [ghostSpec, ghostScale, size]);
+
+  const halfFor = useMemo(
+    () => (n: THREE.Vector3) => halfExtentAlong(half, n),
+    [half],
+  );
 
   useFrame((_, delta) => {
     sceneRefs.camera = camera;
@@ -264,7 +343,10 @@ function CenterProbe({
     sceneRefs.height = viewport.height;
 
     if (tapTarget.point) {
+      // Rest the pending shape on the tapped face instead of merging into it.
       centerPoint.copy(tapTarget.point);
+      const n = tapTarget.normal;
+      if (n) centerPoint.addScaledVector(n, halfFor(n));
       accum.current += delta;
       if (accum.current >= 1 / 30) {
         accum.current = 0;
@@ -284,6 +366,7 @@ function CenterProbe({
       snap,
       grid,
       shapeSnap,
+      halfFor,
     });
     centerPoint.copy(point);
 
@@ -301,6 +384,7 @@ function CenterProbe({
 
   return null;
 }
+
 
 function Ghost({
   spec,
@@ -658,6 +742,7 @@ function TapMarker({ point }: { point: [number, number, number] | null }) {
 export type SceneProps = {
   objects: PlacedObject[];
   view: ViewMode;
+  nav: "gesture" | "swipe-look";
   tool: ToolMode;
   ghostSpec: GeometrySpec;
   ghostScale: [number, number, number];
@@ -689,6 +774,7 @@ export function Scene(props: SceneProps) {
   const {
     objects,
     view,
+    nav,
     tool,
     ghostSpec,
     ghostScale,
@@ -743,7 +829,7 @@ export function Scene(props: SceneProps) {
         />
       </Environment>
 
-      {view === "fly" && <FlyRig />}
+      {view === "fly" && <FlyRig nav={nav} />}
       {view === "orbit" && (
         <OrbitControls
           makeDefault
@@ -776,6 +862,8 @@ export function Scene(props: SceneProps) {
         snap={snap}
         grid={grid}
         shapeSnap={shapeSnap}
+        ghostSpec={ghostSpec}
+        ghostScale={ghostScale}
       />
 
       <Grid
