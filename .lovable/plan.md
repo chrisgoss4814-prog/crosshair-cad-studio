@@ -60,6 +60,28 @@ description and a one-line "how to use it".
 
 Long-press on a 3D object keeps its existing quick menu (Dup / Edit / Motion / Del).
 
+## 4. New navigation: swipe to fly, pinch for depth, one stick to look
+
+Replace the two-joystick setup with gesture movement plus a single look stick.
+
+- **One-finger swipe = move in the screen plane.** Swipe up/down to rise and fall,
+  left/right to slide sideways. Direction follows the swipe, speed follows how far you
+  swiped.
+- **Hold to keep going.** After the swipe, keeping your finger down holds the movement
+  in that direction until you lift off; how far the finger sits from where it started
+  sets the speed, so you can steer while holding.
+- **Pinch = forward / back only.** Pinch out to move forward, pinch in to move back.
+  No zoom-scaling, real camera travel along the view direction.
+- **One joystick, look only.** A single stick (right side, position/side settable)
+  rotates the view. It pivots in place — yaw and pitch about the camera itself, no
+  orbiting around a distant point, so the view spins and tilts like turning your head.
+- Pitch is clamped just short of straight up/down so the horizon never flips.
+- Fine mode, the speed sliders, deadzone and easing ramp all apply to the new gestures
+  the same way they applied to the sticks.
+- Object drag and tap-to-target still take priority when the gesture starts on an
+  object, so building is unaffected.
+- Old twin-stick mode stays available as a Settings option in case you want it back.
+
 ## Technical notes
 
 - Placement offset uses `worldBoxOf`-style bounds of the pending shape projected onto
@@ -70,3 +92,8 @@ Long-press on a 3D object keeps its existing quick menu (Dup / Edit / Motion / D
   nudge/duplicate paths call it.
 - Descriptions live in one map keyed by control id, consumed by a shared `Hint` wrapper
   so no copy is duplicated across the HUD.
+- Navigation: `FlyRig` gains a pointer-drag state feeding `controls.move`/`lift` from a
+  held offset vector; pinch distance delta feeds forward/back; the right stick writes
+  `controls.look` only and rotation is applied to the camera's own quaternion (yaw about
+  world up, pitch about local right) so there is no orbital offset.
+
