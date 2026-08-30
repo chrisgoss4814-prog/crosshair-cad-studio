@@ -582,3 +582,61 @@ export function tickUnitFor(step: number) {
   if (step <= 1) return 1;
   return 10;
 }
+
+// ---------------------------------------------------------------------------
+// Precision / focus helpers
+// ---------------------------------------------------------------------------
+
+/** Latest selection centroid the fly rig can glide to (double-tap / Focus). */
+export const selectionFocusState = {
+  valid: false,
+  point: new THREE.Vector3(),
+};
+
+/** Focus request published by the HUD, consumed by the fly rig each frame. */
+export const flyFocus = { nonce: 0, point: new THREE.Vector3() };
+
+export function requestFlyFocus(p: THREE.Vector3) {
+  flyFocus.point.copy(p);
+  flyFocus.nonce++;
+}
+
+/**
+ * Magnetic alignment: returns corrected center coordinates for axes where the
+ * box nearly lines up with another box (center match, flush edge, or butt
+ * joint). Used to softly snap drags into perfect alignment.
+ */
+export function magneticAlign(
+  box: THREE.Box3,
+  others: { id: string; box: THREE.Box3 }[],
+  tol: number,
+): Partial<Record<"x" | "y" | "z", number>> {
+  const out: Partial<Record<"x" | "y" | "z", number>> = {};
+  const keys = ["x", "y", "z"] as const;
+  const c = box.getCenter(new THREE.Vector3());
+  const s = box.getSize(new THREE.Vector3());
+  for (const k of keys) {
+    const h = s[k] / 2;
+    let best: number | null = null;
+    let bestD = tol;
+    for (const other of others) {
+      const oc = other.box.getCenter(new THREE.Vector3());
+      const candidates = [
+        oc[k],
+        other.box.min[k] + h,
+        other.box.max[k] - h,
+        other.box.max[k] + h,
+        other.box.min[k] - h,
+      ];
+      for (const cand of candidates) {
+        const d = Math.abs(cand - c[k]);
+        if (d <= bestD) {
+          bestD = d;
+          best = cand;
+        }
+      }
+    }
+    if (best !== null && Math.abs(best - c[k]) > 1e-6) out[k] = best;
+  }
+  return out;
+}
