@@ -742,6 +742,7 @@ function TapMarker({ point }: { point: [number, number, number] | null }) {
 export type SceneProps = {
   objects: PlacedObject[];
   view: ViewMode;
+  nav: "gesture" | "swipe-look";
   tool: ToolMode;
   ghostSpec: GeometrySpec;
   ghostScale: [number, number, number];
@@ -773,6 +774,7 @@ export function Scene(props: SceneProps) {
   const {
     objects,
     view,
+    nav,
     tool,
     ghostSpec,
     ghostScale,
@@ -827,7 +829,7 @@ export function Scene(props: SceneProps) {
         />
       </Environment>
 
-      {view === "fly" && <FlyRig />}
+      {view === "fly" && <FlyRig nav={nav} />}
       {view === "orbit" && (
         <OrbitControls
           makeDefault
