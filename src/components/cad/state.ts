@@ -147,15 +147,21 @@ export const controls = {
   move: { x: 0, y: 0 },
   look: { x: 0, y: 0 },
   lift: 0,
-  /** Global joystick speed multiplier (0.05 – 2). */
+  /** Global joystick speed multiplier (0.05 – 3). */
   speed: 1,
-  /** Precision crawl toggle. */
+  /** Per-channel trims. */
+  moveMul: 1,
+  lookMul: 1,
+  liftMul: 1,
+  /** Precision crawl toggle and the speed it jumps to. */
   precision: false,
+  precisionLevel: 0.2,
 };
 
 export function speedFactor() {
-  return controls.speed * (controls.precision ? 0.15 : 1);
+  return controls.precision ? controls.precisionLevel : controls.speed;
 }
+
 
 /** Live world-space position of the screen-center placement point. */
 export const centerPoint = new THREE.Vector3();
