@@ -247,16 +247,42 @@ function CenterProbe({
   snap,
   grid,
   shapeSnap,
+  ghostSpec,
+  ghostScale,
 }: {
   depth: number;
   size: number;
   snap: boolean;
   grid: number;
   shapeSnap: boolean;
+  ghostSpec: GeometrySpec;
+  ghostScale: [number, number, number];
 }) {
   const { camera, size: viewport } = useThree();
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const accum = useRef(0);
+
+  /** Half size of the shape about to be placed, in world units. */
+  const half = useMemo(() => {
+    const geo = buildGeometry(ghostSpec);
+    geo.computeBoundingBox();
+    const b = geo.boundingBox;
+    const v = new THREE.Vector3(size / 2, size / 2, size / 2);
+    if (b) {
+      v.set(
+        Math.max(Math.abs(b.min.x), Math.abs(b.max.x)) * (ghostScale[0] || 1),
+        Math.max(Math.abs(b.min.y), Math.abs(b.max.y)) * (ghostScale[1] || 1),
+        Math.max(Math.abs(b.min.z), Math.abs(b.max.z)) * (ghostScale[2] || 1),
+      );
+    }
+    geo.dispose();
+    return v;
+  }, [ghostSpec, ghostScale, size]);
+
+  const halfFor = useMemo(
+    () => (n: THREE.Vector3) => halfExtentAlong(half, n),
+    [half],
+  );
 
   useFrame((_, delta) => {
     sceneRefs.camera = camera;
@@ -264,7 +290,10 @@ function CenterProbe({
     sceneRefs.height = viewport.height;
 
     if (tapTarget.point) {
+      // Rest the pending shape on the tapped face instead of merging into it.
       centerPoint.copy(tapTarget.point);
+      const n = tapTarget.normal;
+      if (n) centerPoint.addScaledVector(n, halfFor(n));
       accum.current += delta;
       if (accum.current >= 1 / 30) {
         accum.current = 0;
@@ -284,6 +313,7 @@ function CenterProbe({
       snap,
       grid,
       shapeSnap,
+      halfFor,
     });
     centerPoint.copy(point);
 
@@ -301,6 +331,7 @@ function CenterProbe({
 
   return null;
 }
+
 
 function Ghost({
   spec,
