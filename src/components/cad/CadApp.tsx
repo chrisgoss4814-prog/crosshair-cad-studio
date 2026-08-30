@@ -3,7 +3,7 @@ import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import { Joystick } from "./Joystick";
 import { AxisHud } from "./AxisHud";
-import { Scene } from "./Scene";
+import { Scene, type CutPreview } from "./Scene";
 import {
   is2D,
   SHAPES_2D,
@@ -13,21 +13,28 @@ import {
   type ShapeKind,
 } from "./geometry";
 import {
+  alignmentsFor,
   centerPoint,
   centroid,
   cloneObject,
   controls,
   DEFAULT_MATERIAL,
+  DEFAULT_MOTION,
+  geometryOf,
   hydrateObject,
   makeObject,
+  boxesOverlap,
   sceneRefs,
   SNAP,
   STEPS,
   SWATCHES,
   tapTarget,
+  worldBoxOf,
   type CutOp,
   type DragPlaneMode,
   type Material,
+  type MotionMode,
+  type MotionSpec,
   type PlacedObject,
   type ToolMode,
   type ViewMode,
@@ -58,14 +65,35 @@ const VIEWS: { id: ViewMode; label: string }[] = [
   { id: "top", label: "Top" },
 ];
 
-const TOOLS: { id: ToolMode; label: string }[] = [
-  { id: "place", label: "Place" },
-  { id: "edit", label: "Edit" },
-  { id: "cut", label: "Cut" },
-  { id: "measure", label: "Meas" },
+type Cat =
+  | "move"
+  | "place"
+  | "edit"
+  | "stretch"
+  | "cut"
+  | "snap"
+  | "motion"
+  | "style"
+  | "measure"
+  | "ai"
+  | "files";
+
+const CATS: { id: Cat; label: string; tool: ToolMode | null }[] = [
+  { id: "move", label: "Move", tool: null },
+  { id: "place", label: "Place", tool: "place" },
+  { id: "edit", label: "Edit", tool: "edit" },
+  { id: "stretch", label: "Size", tool: "edit" },
+  { id: "cut", label: "Cut", tool: "cut" },
+  { id: "snap", label: "Snap", tool: null },
+  { id: "motion", label: "Motion", tool: "edit" },
+  { id: "style", label: "Style", tool: null },
+  { id: "measure", label: "Meas", tool: "measure" },
+  { id: "ai", label: "AI", tool: null },
+  { id: "files", label: "Files", tool: null },
 ];
 
 const ROT_STEPS = [1, 5, 15, 90];
+const PREFS_KEY = "vb.controls.v1";
 
 function Chip({
   active,
@@ -152,12 +180,58 @@ function Slider({
   );
 }
 
-type PanelId = "none" | "style" | "scenes" | "shape" | "ai" | "settings";
+/** Slider + stepper that always moves in the active decimal step. */
+function NumRow({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  unit = "m",
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+  unit?: string;
+}) {
+  const clamp = (v: number) =>
+    Math.min(max, Math.max(min, +v.toFixed(6)));
+  const decimals = step < 0.01 ? 3 : step < 1 ? 2 : 2;
+  return (
+    <div className="mb-1 flex items-center gap-1.5">
+      <span className="w-12 shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
+      </span>
+      <Btn onClick={() => onChange(clamp(value - step))}>−</Btn>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={Math.min(max, Math.max(min, value))}
+        onChange={(e) => onChange(clamp(Number(e.target.value)))}
+        className="min-w-0 flex-1 accent-accent"
+      />
+      <Btn onClick={() => onChange(clamp(value + step))}>+</Btn>
+      <span className="w-16 shrink-0 text-right font-mono text-[11px]">
+        {value.toFixed(decimals)}
+        {unit}
+      </span>
+    </div>
+  );
+}
 
 export function CadApp() {
   const [objects, setObjects] = useState<PlacedObject[]>([]);
   const [view, setView] = useState<ViewMode>("fly");
   const [tool, setTool] = useState<ToolMode>("place");
+  const [cat, setCat] = useState<Cat | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [sticks, setSticks] = useState(true);
   const [kind, setKind] = useState<ShapeKind>("box");
   const [size, setSize] = useState(1);
   const [stretch, setStretch] = useState<[number, number, number]>([1, 1, 1]);
@@ -168,22 +242,40 @@ export function CadApp() {
   const [bend, setBend] = useState(0);
   const [bendAxis, setBendAxis] = useState<0 | 1 | 2>(1);
   const [taper, setTaper] = useState(0);
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(0.1);
   const [rotStep, setRotStep] = useState(90);
   const [depth, setDepth] = useState(6);
   const [snap, setSnap] = useState(true);
   const [shapeSnap, setShapeSnap] = useState(true);
+  const [blockOverlap, setBlockOverlap] = useState(false);
+  const [showGuides, setShowGuides] = useState(true);
+  const [dragStep, setDragStep] = useState(0);
   const [material, setMaterial] = useState<Material>(DEFAULT_MATERIAL);
   const [dragPlane, setDragPlane] = useState<DragPlaneMode>("horizontal");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [multi, setMulti] = useState(false);
   const [boxSelect, setBoxSelect] = useState(false);
-  const [panel, setPanel] = useState<PanelId>("none");
   const [measureA, setMeasureA] = useState<[number, number, number] | null>(null);
   const [measureB, setMeasureB] = useState<[number, number, number] | null>(null);
   const [tapPoint, setTapPoint] = useState<[number, number, number] | null>(null);
   const [speed, setSpeed] = useState(1);
+  const [moveMul, setMoveMul] = useState(1);
+  const [lookMul, setLookMul] = useState(1);
+  const [liftMul, setLiftMul] = useState(1);
   const [precision, setPrecision] = useState(false);
+  const [precisionLevel, setPrecisionLevel] = useState(0.2);
+  const [playing, setPlaying] = useState(true);
+
+  // Cut tool
+  const [cutW, setCutW] = useState(0.5);
+  const [cutH, setCutH] = useState(0.5);
+  const [cutDepth, setCutDepth] = useState(0.5);
+  const [cutPick, setCutPick] = useState<{
+    objectId: string;
+    point: [number, number, number];
+    normal: [number, number, number];
+  } | null>(null);
+
   const measureRef = useRef<{
     a: [number, number, number] | null;
     b: [number, number, number] | null;
@@ -215,6 +307,21 @@ export function CadApp() {
     if (restored?.length) setObjects(restored);
     setScenes(listScenes());
     setPrefs(loadPrefs());
+    try {
+      const raw = localStorage.getItem(PREFS_KEY);
+      if (raw) {
+        const p = JSON.parse(raw) as Record<string, number>;
+        if (typeof p["speed"] === "number") setSpeed(p["speed"]);
+        if (typeof p["moveMul"] === "number") setMoveMul(p["moveMul"]);
+        if (typeof p["lookMul"] === "number") setLookMul(p["lookMul"]);
+        if (typeof p["liftMul"] === "number") setLiftMul(p["liftMul"]);
+        if (typeof p["precisionLevel"] === "number")
+          setPrecisionLevel(p["precisionLevel"]);
+        if (typeof p["dragStep"] === "number") setDragStep(p["dragStep"]);
+      }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   useEffect(() => {
@@ -223,8 +330,20 @@ export function CadApp() {
 
   useEffect(() => {
     controls.speed = speed;
+    controls.moveMul = moveMul;
+    controls.lookMul = lookMul;
+    controls.liftMul = liftMul;
     controls.precision = precision;
-  }, [speed, precision]);
+    controls.precisionLevel = precisionLevel;
+    try {
+      localStorage.setItem(
+        PREFS_KEY,
+        JSON.stringify({ speed, moveMul, lookMul, liftMul, precisionLevel, dragStep }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [speed, moveMul, lookMul, liftMul, precision, precisionLevel, dragStep]);
 
   // Keep uniform stretch in sync with the size stepper.
   useEffect(() => {
@@ -241,6 +360,8 @@ export function CadApp() {
     [objects, selectedIds],
   );
 
+  const selectedOne = selectedObjects[0] ?? null;
+
   const updateSelected = useCallback(
     (fn: (o: PlacedObject) => PlacedObject) => {
       setObjects((prev) =>
@@ -256,20 +377,33 @@ export function CadApp() {
     setTapPoint(null);
   };
 
+  const wouldCollide = useCallback(
+    (candidate: PlacedObject, ignoreIds: string[]) => {
+      if (!blockOverlap) return false;
+      const box = worldBoxOf(candidate);
+      return objects.some(
+        (o) => !ignoreIds.includes(o.id) && boxesOverlap(box, worldBoxOf(o)),
+      );
+    },
+    [blockOverlap, objects],
+  );
+
   const place = () => {
     const p = centerPoint;
-    setObjects((prev) => [
-      ...prev,
-      makeObject(kind, [p.x, p.y, p.z], size, material, {
-        scale: [...stretch] as [number, number, number],
-        sides,
-        curve,
-        extrude,
-        bend,
-        bendAxis,
-        taper,
-      }),
-    ]);
+    const next = makeObject(kind, [p.x, p.y, p.z], size, material, {
+      scale: [...stretch] as [number, number, number],
+      sides,
+      curve,
+      extrude,
+      bend,
+      bendAxis,
+      taper,
+    });
+    if (wouldCollide(next, [])) {
+      toast.error("Blocked — that spot overlaps another object");
+      return;
+    }
+    setObjects((prev) => [...prev, next]);
     clearTap();
   };
 
@@ -295,9 +429,10 @@ export function CadApp() {
         const dx = pos[0] - target.position[0];
         const dy = pos[1] - target.position[1];
         const dz = pos[2] - target.position[2];
+        if (!dx && !dy && !dz) return prev;
         const ids =
           selectedIds.includes(id) && selectedIds.length > 1 ? selectedIds : [id];
-        return prev.map((o) =>
+        const moved = prev.map((o) =>
           ids.includes(o.id)
             ? {
                 ...o,
@@ -309,9 +444,21 @@ export function CadApp() {
               }
             : o,
         );
+        if (blockOverlap) {
+          const others = moved.filter((o) => !ids.includes(o.id));
+          const boxes = others.map((o) => worldBoxOf(o));
+          const hit = moved
+            .filter((o) => ids.includes(o.id))
+            .some((o) => {
+              const b = worldBoxOf(o);
+              return boxes.some((ob) => boxesOverlap(b, ob));
+            });
+          if (hit) return prev;
+        }
+        return moved;
       });
     },
-    [selectedIds],
+    [selectedIds, blockOverlap],
   );
 
   const onTapTarget = useCallback((p: THREE.Vector3, n: THREE.Vector3) => {
@@ -321,36 +468,114 @@ export function CadApp() {
       setTapPoint(null);
       return;
     }
-    const point = p.clone().addScaledVector(n, 0);
+    const point = p.clone();
     tapTarget.point = point;
     tapTarget.normal = n.clone();
     setTapPoint([point.x, point.y, point.z]);
   }, []);
 
-  /** Cut tool: subtract the active shape (at the tapped point) from an object. */
+  // --- cut ------------------------------------------------------------------
+
   const onCutPick = useCallback(
-    (id: string, p: THREE.Vector3) => {
-      const op: CutOp = {
-        id: crypto.randomUUID(),
-        op: "subtract",
+    (id: string, p: THREE.Vector3, n: THREE.Vector3) => {
+      setCutPick({
+        objectId: id,
+        point: [p.x, p.y, p.z],
+        normal: [n.x, n.y, n.z],
+      });
+      setCat("cut");
+    },
+    [],
+  );
+
+  /** Cutter transform: sunk into the tapped face by the chosen depth. */
+  const cutTransform = useMemo(() => {
+    if (!cutPick) return null;
+    const n = new THREE.Vector3(...cutPick.normal).normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      n,
+    );
+    const e = new THREE.Euler().setFromQuaternion(q);
+    const d = Math.max(0.001, cutDepth);
+    const center = new THREE.Vector3(...cutPick.point).addScaledVector(
+      n,
+      -(d / 2) + 0.002,
+    );
+    return {
+      position: [center.x, center.y, center.z] as [number, number, number],
+      rotation: [e.x, e.y, e.z] as [number, number, number],
+      scale: [Math.max(0.001, cutW), d, Math.max(0.001, cutH)] as [
+        number,
+        number,
+        number,
+      ],
+    };
+  }, [cutPick, cutW, cutH, cutDepth]);
+
+  const cutPreview: CutPreview | null = useMemo(() => {
+    if (!cutPick || !cutTransform) return null;
+    return {
+      objectId: cutPick.objectId,
+      spec: {
         kind,
         sides,
         curve,
-        extrude,
-        position: [p.x, p.y, p.z],
-        rotation: [0, 0, 0],
-        scale: [...stretch] as [number, number, number],
-      };
-      setObjects((prev) =>
-        prev.map((o) => (o.id === id ? { ...o, ops: [...(o.ops ?? []), op] } : o)),
-      );
-      toast.success(`Cut ${kind} hole`);
-    },
-    [kind, sides, curve, extrude, stretch],
-  );
+        extrude: is2D(kind) ? 1 : 0,
+        bend: 0,
+        bendAxis: 1,
+        taper: 0,
+        profile: null,
+      },
+      ...cutTransform,
+    };
+  }, [cutPick, cutTransform, kind, sides, curve]);
+
+  const applyCut = () => {
+    if (!cutPick || !cutTransform) return;
+    const op: CutOp = {
+      id: crypto.randomUUID(),
+      op: "subtract",
+      kind,
+      sides,
+      curve,
+      extrude: is2D(kind) ? 1 : 0,
+      position: cutTransform.position,
+      rotation: cutTransform.rotation,
+      scale: cutTransform.scale,
+    };
+    const target = objects.find((o) => o.id === cutPick.objectId);
+    if (!target) return;
+    const trial: PlacedObject = { ...target, ops: [...(target.ops ?? []), op] };
+    // Verify the cut leaves something behind before committing it.
+    const geoAfter = (() => {
+      try {
+        return geometryOf(trial).getAttribute("position")?.count ?? 0;
+      } catch {
+        return 0;
+      }
+    })();
+    if (geoAfter === 0) {
+      toast.error("That cut would remove the whole object — shrink it");
+      return;
+    }
+    setObjects((prev) => prev.map((o) => (o.id === trial.id ? trial : o)));
+    setCutPick(null);
+    toast.success(`Cut ${cutW.toFixed(2)}×${cutH.toFixed(2)} × ${cutDepth.toFixed(2)}m deep`);
+  };
 
   const undoLastCut = () => {
-    updateSelected((o) => ({ ...o, ops: (o.ops ?? []).slice(0, -1) }));
+    if (selectedIds.length) {
+      updateSelected((o) => ({ ...o, ops: (o.ops ?? []).slice(0, -1) }));
+      return;
+    }
+    setObjects((prev) => {
+      const last = [...prev].reverse().find((o) => (o.ops ?? []).length);
+      if (!last) return prev;
+      return prev.map((o) =>
+        o.id === last.id ? { ...o, ops: o.ops.slice(0, -1) } : o,
+      );
+    });
   };
 
   const booleanSelected = (op: "union" | "intersect" | "subtract") => {
@@ -381,9 +606,10 @@ export function CadApp() {
     updateSelected((o) => ({ ...o, profile: p }));
 
   const nudge = (axis: 0 | 1 | 2, dir: 1 | -1) => {
+    const amount = (dragStep > 0 ? dragStep : step) * dir;
     updateSelected((o) => {
       const position = [...o.position] as [number, number, number];
-      position[axis] = +(position[axis] + dir * step).toFixed(6);
+      position[axis] = +((position[axis] ?? 0) + amount).toFixed(6);
       return { ...o, position };
     });
   };
@@ -395,7 +621,19 @@ export function CadApp() {
         number,
         number,
       ];
-      scale[axis] = Math.max(0.001, +(scale[axis] + dir * step).toFixed(6));
+      scale[axis] = Math.max(0.001, +((scale[axis] ?? 1) + dir * step).toFixed(6));
+      return { ...o, scale };
+    });
+  };
+
+  const setSelectedScale = (axis: 0 | 1 | 2, v: number) => {
+    updateSelected((o) => {
+      const scale = [...(o.scale ?? [o.size, o.size, o.size])] as [
+        number,
+        number,
+        number,
+      ];
+      scale[axis] = Math.max(0.001, +v.toFixed(6));
       return { ...o, scale };
     });
   };
@@ -404,7 +642,7 @@ export function CadApp() {
     const rad = (rotStep * Math.PI) / 180;
     updateSelected((o) => {
       const rotation = [...o.rotation] as [number, number, number];
-      rotation[axis] = +(rotation[axis] + dir * rad).toFixed(6);
+      rotation[axis] = +((rotation[axis] ?? 0) + dir * rad).toFixed(6);
       return { ...o, rotation };
     });
   };
@@ -421,6 +659,13 @@ export function CadApp() {
         ],
       };
     });
+  };
+
+  const setMotion = (patch: Partial<MotionSpec>) => {
+    updateSelected((o) => ({
+      ...o,
+      motion: { ...(o.motion ?? DEFAULT_MOTION), ...patch },
+    }));
   };
 
   const duplicate = () => {
@@ -465,6 +710,17 @@ export function CadApp() {
     setMeasureB(null);
   };
 
+  /** Live "lines up on X/Y/Z" readout for the selection. */
+  const alignedAxes = useMemo(() => {
+    if (!selectedOne) return [] as string[];
+    const box = worldBoxOf(selectedOne);
+    const others = objects
+      .filter((o) => o.id !== selectedOne.id)
+      .map((o) => ({ id: o.id, box: worldBoxOf(o) }));
+    const hits = alignmentsFor(box, others, Math.max(0.005, grid * 0.25));
+    return Array.from(new Set(hits.map((h) => ["X", "Y", "Z"][h.axis] as string)));
+  }, [selectedOne, objects, grid]);
+
   // --- box select -----------------------------------------------------------
   const projectToScreen = (o: PlacedObject) => {
     const cam = sceneRefs.camera;
@@ -500,19 +756,21 @@ export function CadApp() {
     saveScene(name, objects);
     setScenes(listScenes());
     setSceneName("");
+    toast.success(`Saved “${name}”`);
   };
 
-  // --- AI builder -----------------------------------------------------------
+  // --- AI -------------------------------------------------------------------
+
   const sceneSummary = () =>
     objects
-      .slice(-40)
+      .slice(-30)
       .map(
         (o) =>
           `${o.kind} at ${o.position.map((v) => v.toFixed(2)).join(",")} size ${(
             o.scale ?? [o.size, o.size, o.size]
           )
             .map((v) => v.toFixed(2))
-            .join("x")}`,
+            .join("×")}`,
       )
       .join("\n");
 
@@ -552,7 +810,7 @@ export function CadApp() {
           kind: kindOk,
           sides: Math.max(3, Math.round(s.sides || 6)),
           curve: THREE.MathUtils.clamp(s.curve, 0, 1),
-          extrude: Math.max(0, s.extrude),
+          extrude: is2D(kindOk) ? Math.max(0.01, s.extrude || 1) : 0,
           position: [s.x, s.y, s.z],
           rotation: [s.rx, s.ry, s.rz],
           scale: [
@@ -579,7 +837,6 @@ export function CadApp() {
     const text = prompt.trim();
     if (!text || aiBusy) return;
     setAiBusy(true);
-    setAiSummary(null);
     beforeAi.current = objects;
     lastPrompt.current = text;
     try {
@@ -594,7 +851,7 @@ export function CadApp() {
       setAiSummary(result.summary);
       setAiSteps(result.steps);
       applySteps(result.steps);
-      setPrompt("");
+      toast.success(`Built ${result.steps.length} steps`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "AI build failed");
     } finally {
@@ -639,16 +896,658 @@ export function CadApp() {
         <Chip
           key={k}
           active={kind === k}
-          onClick={() => {
-            setKind(k as ShapeKind);
-            if (is2D(k as ShapeKind) && extrude === 0) setExtrude(0);
-          }}
+          onClick={() => setKind(k as ShapeKind)}
         >
           {k}
         </Chip>
       ))}
     </div>
   );
+
+  const openCat = (c: Cat) => {
+    if (cat === c) {
+      setCat(null);
+      return;
+    }
+    setCat(c);
+    setCollapsed(false);
+    const def = CATS.find((x) => x.id === c);
+    if (def?.tool) {
+      setTool(def.tool);
+      if (def.tool !== "measure") resetMeasure();
+      if (def.tool !== "place") clearTap();
+      if (def.tool !== "cut") setCutPick(null);
+    }
+  };
+
+  const stepRow = (
+    <div className="flex items-center gap-1">
+      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        step
+      </span>
+      {STEPS.map((s) => (
+        <Chip key={s} active={step === s} onClick={() => setStep(s)}>
+          {s}
+        </Chip>
+      ))}
+    </div>
+  );
+
+  const noSelection = (
+    <p className="font-mono text-[10px] text-muted-foreground">
+      Tap an object first.
+    </p>
+  );
+
+  const stripBody = () => {
+    switch (cat) {
+      case "move":
+        return (
+          <>
+            <Slider
+              label="speed"
+              value={speed}
+              min={0.05}
+              max={3}
+              step={0.05}
+              onChange={setSpeed}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+            <Slider
+              label="stick"
+              value={moveMul}
+              min={0.1}
+              max={2}
+              step={0.05}
+              onChange={setMoveMul}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+            <Slider
+              label="look"
+              value={lookMul}
+              min={0.1}
+              max={2}
+              step={0.05}
+              onChange={setLookMul}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+            <Slider
+              label="lift"
+              value={liftMul}
+              min={0.1}
+              max={2}
+              step={0.05}
+              onChange={setLiftMul}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+            <Slider
+              label="slow at"
+              value={precisionLevel}
+              min={0.02}
+              max={1}
+              step={0.02}
+              onChange={setPrecisionLevel}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+            <div className="flex flex-wrap gap-1.5">
+              <Chip active={precision} onClick={() => setPrecision((p) => !p)}>
+                Slow {precision ? "on" : "off"}
+              </Chip>
+              <Chip active={sticks} onClick={() => setSticks((s) => !s)}>
+                Sticks {sticks ? "on" : "off"}
+              </Chip>
+              <Btn onClick={() => setDepth((d) => +(d + 1).toFixed(2))}>Depth +</Btn>
+              <Btn onClick={() => setDepth((d) => Math.max(1, +(d - 1).toFixed(2)))}>
+                Depth −
+              </Btn>
+              <span className="self-center font-mono text-[10px] text-muted-foreground">
+                {depth.toFixed(1)}m
+              </span>
+            </div>
+          </>
+        );
+
+      case "place":
+        return (
+          <>
+            <div className="max-h-24 overflow-y-auto">
+              {shapeList(SHAPES_3D)}
+              <div className="h-1" />
+              {shapeList(SHAPES_2D)}
+            </div>
+            <div className="mt-1.5">{stepRow}</div>
+            <div className="mt-1.5">
+              <div className="mb-1 flex items-center gap-2">
+                <Chip active={lockStretch} onClick={() => setLockStretch((l) => !l)}>
+                  {lockStretch ? "uniform" : "free"}
+                </Chip>
+                {is2D(kind) && (
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    extrude for a solid
+                  </span>
+                )}
+              </div>
+              {lockStretch ? (
+                <NumRow
+                  label="size"
+                  value={size}
+                  min={0.001}
+                  max={40}
+                  step={step}
+                  onChange={setSize}
+                />
+              ) : (
+                (["x", "y", "z"] as const).map((ax, i) => (
+                  <NumRow
+                    key={ax}
+                    label={ax}
+                    value={stretch[i] ?? 1}
+                    min={0.001}
+                    max={40}
+                    step={step}
+                    onChange={(v) =>
+                      setStretch((s) => {
+                        const n = [...s] as [number, number, number];
+                        n[i] = v;
+                        return n;
+                      })
+                    }
+                  />
+                ))
+              )}
+              {is2D(kind) && (
+                <NumRow
+                  label="extrude"
+                  value={extrude}
+                  min={0}
+                  max={20}
+                  step={step}
+                  onChange={setExtrude}
+                />
+              )}
+              <NumRow
+                label="sides"
+                value={sides}
+                min={3}
+                max={24}
+                step={1}
+                onChange={(v) => setSides(Math.round(v))}
+                unit=""
+              />
+              <NumRow
+                label="curve"
+                value={curve}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={setCurve}
+                unit=""
+              />
+              <NumRow
+                label="bend"
+                value={bend}
+                min={-2}
+                max={2}
+                step={0.05}
+                onChange={setBend}
+                unit="r"
+              />
+              <NumRow
+                label="taper"
+                value={taper}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={setTaper}
+                unit=""
+              />
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                  bend axis
+                </span>
+                {(["X", "Y", "Z"] as const).map((l, i) => (
+                  <Chip
+                    key={l}
+                    active={bendAxis === i}
+                    onClick={() => setBendAxis(i as 0 | 1 | 2)}
+                  >
+                    {l}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+          </>
+        );
+
+      case "edit":
+        return (
+          <>
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              <Chip active={multi} onClick={() => setMulti((m) => !m)}>
+                Multi
+              </Chip>
+              <Chip active={boxSelect} onClick={() => setBoxSelect((b) => !b)}>
+                Box
+              </Chip>
+              <Chip
+                active={dragPlane === "facing"}
+                onClick={() =>
+                  setDragPlane((p) => (p === "facing" ? "horizontal" : "facing"))
+                }
+              >
+                {dragPlane === "facing" ? "Face" : "Horz"}
+              </Chip>
+              <Btn onClick={duplicate} disabled={!selectedIds.length}>
+                Dup
+              </Btn>
+              <Btn onClick={groupSelected} disabled={selectedIds.length < 2}>
+                Group
+              </Btn>
+              <Btn onClick={ungroupSelected} disabled={!selectedIds.length}>
+                Ungrp
+              </Btn>
+              <Btn onClick={() => booleanSelected("union")} disabled={selectedIds.length < 2}>
+                Join
+              </Btn>
+              <Btn onClick={() => booleanSelected("subtract")} disabled={selectedIds.length < 2}>
+                Sub
+              </Btn>
+              <Btn onClick={undoLastCut}>Uncut</Btn>
+              <Btn onClick={removeSelected} disabled={!selectedIds.length}>
+                Del
+              </Btn>
+            </div>
+            {stepRow}
+            <div className="mt-1.5">
+              <NumRow
+                label="drag by"
+                value={dragStep}
+                min={0}
+                max={5}
+                step={step}
+                onChange={setDragStep}
+              />
+              <p className="mb-1 font-mono text-[10px] text-muted-foreground">
+                0 = free drag. Otherwise objects hop in {dragStep.toFixed(3)}m steps.
+              </p>
+            </div>
+            {selectedOne ? (
+              <>
+                {(
+                  [
+                    [0, "x", "text-axis-x"],
+                    [1, "y", "text-axis-y"],
+                    [2, "z", "text-axis-z"],
+                  ] as const
+                ).map(([axis, label]) => (
+                  <div key={label} className="mb-1 flex items-center gap-1.5">
+                    <span className="w-12 font-mono text-[10px] uppercase text-muted-foreground">
+                      {label}
+                    </span>
+                    <Btn onClick={() => nudge(axis, -1)}>−</Btn>
+                    <span className="min-w-16 text-center font-mono text-[11px]">
+                      {(selectedOne.position[axis] ?? 0).toFixed(3)}
+                    </span>
+                    <Btn onClick={() => nudge(axis, 1)}>+</Btn>
+                    <span className="ml-auto flex items-center gap-1">
+                      <Btn onClick={() => rotate(axis, -1)}>↺</Btn>
+                      <Btn onClick={() => rotate(axis, 1)}>↻</Btn>
+                    </span>
+                  </div>
+                ))}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                    rot
+                  </span>
+                  {ROT_STEPS.map((r) => (
+                    <Chip key={r} active={rotStep === r} onClick={() => setRotStep(r)}>
+                      {r}°
+                    </Chip>
+                  ))}
+                </div>
+              </>
+            ) : (
+              noSelection
+            )}
+          </>
+        );
+
+      case "stretch":
+        return selectedOne ? (
+          <>
+            {stepRow}
+            <div className="mt-1.5">
+              {(["x", "y", "z"] as const).map((ax, i) => (
+                <NumRow
+                  key={ax}
+                  label={ax}
+                  value={(selectedOne.scale ?? [1, 1, 1])[i] ?? 1}
+                  min={0.001}
+                  max={40}
+                  step={step}
+                  onChange={(v) => setSelectedScale(i as 0 | 1 | 2, v)}
+                />
+              ))}
+              <div className="flex gap-1.5">
+                <Btn onClick={() => resizeSelected(-1)}>All −</Btn>
+                <Btn onClick={() => resizeSelected(1)}>All +</Btn>
+                {(["x", "y", "z"] as const).map((ax, i) => (
+                  <span key={ax} className="flex items-center gap-1">
+                    <Btn onClick={() => stretchSelected(i as 0 | 1 | 2, -1)}>−{ax}</Btn>
+                    <Btn onClick={() => stretchSelected(i as 0 | 1 | 2, 1)}>+{ax}</Btn>
+                  </span>
+                ))}
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                  profile
+                </span>
+                {SHAPES_2D.map((p) => (
+                  <Chip key={p} onClick={() => applyProfileToSelected(p)}>
+                    {p}
+                  </Chip>
+                ))}
+                <Chip onClick={() => updateSelected((o) => ({ ...o, profile: null }))}>
+                  none
+                </Chip>
+              </div>
+            </div>
+          </>
+        ) : (
+          noSelection
+        );
+
+      case "cut":
+        return (
+          <>
+            <div className="max-h-16 overflow-y-auto">
+              {shapeList([...SHAPES_2D, ...SHAPES_3D])}
+            </div>
+            <div className="mt-1.5">{stepRow}</div>
+            <div className="mt-1.5">
+              <NumRow label="width" value={cutW} min={0.001} max={20} step={step} onChange={setCutW} />
+              <NumRow label="height" value={cutH} min={0.001} max={20} step={step} onChange={setCutH} />
+              <NumRow label="depth" value={cutDepth} min={0.001} max={20} step={step} onChange={setCutDepth} />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {cutPick ? (
+                <>
+                  <Btn onClick={applyCut}>Apply cut</Btn>
+                  <Btn onClick={() => setCutPick(null)}>Cancel</Btn>
+                </>
+              ) : (
+                <span className="font-mono text-[10px] text-muted-foreground">
+                  Tap the face you want to cut into.
+                </span>
+              )}
+              <Btn onClick={undoLastCut}>Undo cut</Btn>
+            </div>
+          </>
+        );
+
+      case "snap":
+        return (
+          <>
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              <Chip active={snap} onClick={() => setSnap((s) => !s)}>
+                Grid snap {snap ? "on" : "off"}
+              </Chip>
+              <Chip active={shapeSnap} onClick={() => setShapeSnap((s) => !s)}>
+                Shape snap {shapeSnap ? "on" : "off"}
+              </Chip>
+              <Chip active={blockOverlap} onClick={() => setBlockOverlap((b) => !b)}>
+                {blockOverlap ? "Block overlap" : "Allow overlap"}
+              </Chip>
+              <Chip active={showGuides} onClick={() => setShowGuides((g) => !g)}>
+                Align guides {showGuides ? "on" : "off"}
+              </Chip>
+              <Chip active={!!tapPoint} onClick={clearTap}>
+                {tapPoint ? "Clear tap target" : "No tap target"}
+              </Chip>
+            </div>
+            {stepRow}
+            <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+              Grid snap rounds to the active step ({step}m). Shape snap pulls to
+              corners, edge midpoints and face centers of nearby objects.
+              {alignedAxes.length
+                ? ` Selection lines up on ${alignedAxes.join(", ")}.`
+                : ""}
+            </p>
+          </>
+        );
+
+      case "motion": {
+        if (!selectedOne) return noSelection;
+        const m = selectedOne.motion ?? DEFAULT_MOTION;
+        return (
+          <>
+            <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+              {(["off", "linear", "oscillate", "orbit"] as MotionMode[]).map((mode) => (
+                <Chip
+                  key={mode}
+                  active={m.mode === mode}
+                  onClick={() => setMotion({ mode })}
+                >
+                  {mode}
+                </Chip>
+              ))}
+              <Chip active={playing} onClick={() => setPlaying((p) => !p)}>
+                {playing ? "Playing" : "Paused"}
+              </Chip>
+            </div>
+            <div className="mb-1.5 flex items-center gap-1.5">
+              <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                axis
+              </span>
+              {(["X", "Y", "Z"] as const).map((l, i) => (
+                <Chip
+                  key={l}
+                  active={m.axis === i}
+                  onClick={() => setMotion({ axis: i as 0 | 1 | 2 })}
+                >
+                  {l}
+                </Chip>
+              ))}
+            </div>
+            <NumRow
+              label={m.mode === "orbit" ? "radius" : "distance"}
+              value={m.distance}
+              min={0}
+              max={40}
+              step={step}
+              onChange={(v) => setMotion({ distance: v })}
+            />
+            <NumRow
+              label="speed"
+              value={m.speed}
+              min={0.01}
+              max={10}
+              step={0.05}
+              onChange={(v) => setMotion({ speed: v })}
+              unit={m.mode === "orbit" ? "r/s" : "m/s"}
+            />
+            <NumRow
+              label="accel"
+              value={m.accel}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => setMotion({ accel: v })}
+              unit=""
+            />
+            <NumRow
+              label="pause"
+              value={m.pause}
+              min={0}
+              max={10}
+              step={0.1}
+              onChange={(v) => setMotion({ pause: v })}
+              unit="s"
+            />
+          </>
+        );
+      }
+
+      case "style":
+        return (
+          <>
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {SWATCHES.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-label={`color ${c}`}
+                  onClick={() => {
+                    const next = { ...material, color: c };
+                    setMaterial(next);
+                    if (selectedIds.length) applyMaterialToSelected(next);
+                  }}
+                  className={`h-7 w-7 rounded-md border ${
+                    material.color === c ? "border-accent" : "border-grid-line"
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+              <input
+                type="color"
+                aria-label="custom color"
+                value={material.color}
+                onChange={(e) => {
+                  const next = { ...material, color: e.target.value };
+                  setMaterial(next);
+                  if (selectedIds.length) applyMaterialToSelected(next);
+                }}
+                className="h-7 w-9 rounded-md border border-grid-line bg-transparent"
+              />
+            </div>
+            {(["metalness", "roughness"] as const).map((key) => (
+              <Slider
+                key={key}
+                label={key.slice(0, 5)}
+                value={material[key]}
+                min={0}
+                max={1}
+                step={0.05}
+                onChange={(v) => {
+                  const next = { ...material, [key]: v };
+                  setMaterial(next);
+                  if (selectedIds.length) applyMaterialToSelected(next);
+                }}
+              />
+            ))}
+          </>
+        );
+
+      case "measure":
+        return (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Btn onClick={() => onMeasurePick(centerPoint.clone())}>Mark point</Btn>
+            <Btn onClick={resetMeasure}>Clear</Btn>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              Tap two points, or mark the screen center.
+            </span>
+          </div>
+        );
+
+      case "ai":
+        return (
+          <>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g. a 4m brick wall with an arched doorway"
+              rows={2}
+              className="w-full resize-none rounded-md border border-grid-line bg-background/60 px-2 py-1.5 font-mono text-[11px] outline-none focus:border-accent"
+            />
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <Btn onClick={runAi} disabled={aiBusy || !prompt.trim()}>
+                {aiBusy ? "Building…" : "Build"}
+              </Btn>
+              {aiIds.length > 0 && (
+                <>
+                  <Btn onClick={acceptAi}>Keep</Btn>
+                  <Btn onClick={() => rejectAi("undone by user")}>Undo</Btn>
+                </>
+              )}
+            </div>
+            {aiSummary && (
+              <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">
+                {aiSummary} — {aiSteps.length} steps.
+              </p>
+            )}
+            <input
+              value={prefs.notes}
+              onChange={(e) => {
+                const next = { ...prefs, notes: e.target.value };
+                setPrefs(next);
+                savePrefs(next);
+              }}
+              placeholder="style notes it should always follow"
+              className="mt-1.5 w-full rounded-md border border-grid-line bg-background/60 px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
+            />
+          </>
+        );
+
+      case "files":
+        return (
+          <>
+            <div className="mb-1.5 flex gap-1.5">
+              <input
+                value={sceneName}
+                onChange={(e) => setSceneName(e.target.value)}
+                placeholder="scene name"
+                className="min-w-0 flex-1 rounded-md border border-grid-line bg-background/60 px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
+              />
+              <Btn onClick={doSave}>Save</Btn>
+              <Btn
+                onClick={() => {
+                  setObjects([]);
+                  setSelectedIds([]);
+                }}
+              >
+                New
+              </Btn>
+            </div>
+            <div className="max-h-28 space-y-1 overflow-y-auto">
+              {scenes.length === 0 && (
+                <p className="font-mono text-[10px] text-muted-foreground">
+                  No saved scenes yet.
+                </p>
+              )}
+              {scenes.map((n) => (
+                <div key={n} className="flex items-center gap-1.5">
+                  <span className="flex-1 truncate font-mono text-[11px]">{n}</span>
+                  <Btn
+                    onClick={() => {
+                      const loaded = loadScene(n);
+                      if (loaded) {
+                        setObjects(loaded.map((o) => hydrateObject(o)));
+                        setSelectedIds([]);
+                      }
+                    }}
+                  >
+                    Load
+                  </Btn>
+                  <Btn
+                    onClick={() => {
+                      deleteScene(n);
+                      setScenes(listScenes());
+                    }}
+                  >
+                    ✕
+                  </Btn>
+                </div>
+              ))}
+            </div>
+          </>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  const focused = cat !== null;
 
   return (
     <main className="fixed inset-0 overflow-hidden bg-background text-foreground">
@@ -666,12 +1565,16 @@ export function CadApp() {
           snap={snap}
           shapeSnap={shapeSnap}
           grid={grid}
+          dragStep={dragStep}
+          playing={playing}
+          showGuides={showGuides}
           material={material}
           dragPlane={dragPlane}
           selectedIds={selectedIds}
           measureA={measureA}
           measureB={measureB}
           tapPoint={tapPoint}
+          cutPreview={cutPreview}
           onSelect={handleSelect}
           onSelectNone={() => setSelectedIds([])}
           onMove={handleMove}
@@ -713,581 +1616,64 @@ export function CadApp() {
         </div>
       )}
 
-      {/* Top bar */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3">
-        <div className="pointer-events-auto flex gap-1.5">
-          {VIEWS.map((v) => (
-            <Chip key={v.id} active={view === v.id} onClick={() => setView(v.id)}>
-              {v.label}
-            </Chip>
-          ))}
-        </div>
-        <div className="pointer-events-auto flex flex-wrap justify-end gap-1.5">
-          {TOOLS.map((t) => (
-            <Chip
-              key={t.id}
-              active={tool === t.id}
-              onClick={() => {
-                setTool(t.id);
-                if (t.id !== "measure") resetMeasure();
-                if (t.id !== "place") clearTap();
-              }}
-            >
-              {t.label}
-            </Chip>
-          ))}
-          <Chip
-            active={panel === "ai"}
-            onClick={() => setPanel(panel === "ai" ? "none" : "ai")}
-          >
-            AI
-          </Chip>
-          <Chip
-            active={panel === "scenes"}
-            onClick={() => setPanel(panel === "scenes" ? "none" : "scenes")}
-          >
-            Files
-          </Chip>
-        </div>
-      </div>
-
-      {/* Left rail: depth + lift */}
-      <div className="pointer-events-auto absolute left-3 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1.5">
-        <Btn onClick={() => setDepth((d) => +(d + 1).toFixed(2))}>D+</Btn>
-        <span className="text-center font-mono text-[10px] text-muted-foreground">
-          {depth.toFixed(1)}m
-        </span>
-        <Btn onClick={() => setDepth((d) => Math.max(1, +(d - 1).toFixed(2)))}>D−</Btn>
-        {view === "fly" && (
-          <>
-            <div className="my-1 h-px bg-grid-line" />
-            <Btn onClick={() => {}} className="select-none">
-              <span
-                onPointerDown={() => (controls.lift = 1)}
-                onPointerUp={() => (controls.lift = 0)}
-                onPointerLeave={() => (controls.lift = 0)}
-                className="block"
-              >
-                ↑
-              </span>
-            </Btn>
-            <Btn onClick={() => {}} className="select-none">
-              <span
-                onPointerDown={() => (controls.lift = -1)}
-                onPointerUp={() => (controls.lift = 0)}
-                onPointerLeave={() => (controls.lift = 0)}
-                className="block"
-              >
-                ↓
-              </span>
-            </Btn>
-          </>
-        )}
-      </div>
-
-      {/* Right rail */}
-      <div className="pointer-events-auto absolute right-3 top-1/2 z-40 flex max-h-[62vh] -translate-y-1/2 flex-col gap-1.5 overflow-y-auto">
-        {(tool === "place" || tool === "cut") && (
-          <Chip
-            active={panel === "shape"}
-            onClick={() => setPanel(panel === "shape" ? "none" : "shape")}
-          >
-            Shapes
-          </Chip>
-        )}
-
-        {tool === "edit" && (
-          <>
-            <Chip active={multi} onClick={() => setMulti((m) => !m)}>
-              Multi
-            </Chip>
-            <Chip active={boxSelect} onClick={() => setBoxSelect((b) => !b)}>
-              Box
-            </Chip>
-            <Chip
-              active={dragPlane === "facing"}
-              onClick={() =>
-                setDragPlane((p) => (p === "facing" ? "horizontal" : "facing"))
-              }
-            >
-              {dragPlane === "facing" ? "Face" : "Horz"}
-            </Chip>
-            <Btn onClick={duplicate} disabled={!selectedIds.length}>
-              Dup
-            </Btn>
-            <Btn onClick={() => booleanSelected("union")} disabled={selectedIds.length < 2}>
-              Join
-            </Btn>
-            <Btn
-              onClick={() => booleanSelected("subtract")}
-              disabled={selectedIds.length < 2}
-            >
-              Sub
-            </Btn>
-            <Btn
-              onClick={() => booleanSelected("intersect")}
-              disabled={selectedIds.length < 2}
-            >
-              Isect
-            </Btn>
-            <Btn onClick={undoLastCut} disabled={!selectedIds.length}>
-              Uncut
-            </Btn>
-            <Btn onClick={groupSelected} disabled={selectedIds.length < 2}>
-              Group
-            </Btn>
-            <Btn onClick={ungroupSelected} disabled={!selectedIds.length}>
-              Ungrp
-            </Btn>
-            <Btn onClick={removeSelected} disabled={!selectedIds.length}>
-              Del
-            </Btn>
-          </>
-        )}
-
-        {tool === "measure" && <Btn onClick={resetMeasure}>Clear</Btn>}
-
-        <Chip
-          active={panel === "style"}
-          onClick={() => setPanel(panel === "style" ? "none" : "style")}
-        >
-          Style
-        </Chip>
-        <Chip
-          active={panel === "settings"}
-          onClick={() => setPanel(panel === "settings" ? "none" : "settings")}
-        >
-          Ctrl
-        </Chip>
-      </div>
-
-      {/* Shape / form panel */}
-      {panel === "shape" && (
-        <div className="pointer-events-auto absolute right-3 top-14 z-40 max-h-[68vh] w-[min(92vw,340px)] overflow-y-auto rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
-          <button type="button" onClick={() => setPanel("none")} aria-label="close panel" className="float-right -mt-1 rounded-md border border-grid-line px-2 py-0.5 font-mono text-[11px] text-muted-foreground">✕</button>
-          <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            solids
-          </p>
-          {shapeList(SHAPES_3D)}
-          <p className="mb-1 mt-3 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            2d profiles
-          </p>
-          {shapeList(SHAPES_2D)}
-
-          <div className="mt-3 space-y-1">
-            {is2D(kind) && (
-              <Slider
-                label="extrude"
-                value={extrude}
-                min={0}
-                max={10}
-                step={0.05}
-                onChange={setExtrude}
-                format={(v) => `${v.toFixed(2)}m`}
-              />
-            )}
-            <Slider
-              label="sides"
-              value={sides}
-              min={3}
-              max={24}
-              step={1}
-              onChange={setSides}
-              format={(v) => String(v)}
-            />
-            <Slider label="curve" value={curve} min={0} max={1} step={0.05} onChange={setCurve} />
-            <Slider
-              label="bend"
-              value={bend}
-              min={-2}
-              max={2}
-              step={0.05}
-              onChange={setBend}
-              format={(v) => `${((v * 180) / Math.PI).toFixed(0)}°`}
-            />
-            <div className="mb-1.5 flex items-center gap-1.5">
-              <span className="w-14 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                axis
-              </span>
-              {(["X", "Y", "Z"] as const).map((l, i) => (
-                <Chip
-                  key={l}
-                  active={bendAxis === i}
-                  onClick={() => setBendAxis(i as 0 | 1 | 2)}
-                >
-                  {l}
-                </Chip>
-              ))}
-            </div>
-            <Slider label="taper" value={taper} min={0} max={1} step={0.05} onChange={setTaper} />
-          </div>
-
-          <div className="mt-3">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                stretch
-              </span>
-              <Chip active={lockStretch} onClick={() => setLockStretch((l) => !l)}>
-                {lockStretch ? "uniform" : "free"}
+      {/* Top bar — hidden while a toolbar strip is open */}
+      {!focused && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3">
+          <div className="pointer-events-auto flex gap-1.5">
+            {VIEWS.map((v) => (
+              <Chip key={v.id} active={view === v.id} onClick={() => setView(v.id)}>
+                {v.label}
               </Chip>
-            </div>
-            {(["x", "y", "z"] as const).map((ax, i) => (
-              <Slider
-                key={ax}
-                label={ax}
-                value={stretch[i] ?? 1}
-                min={0.05}
-                max={20}
-                step={0.05}
-                onChange={(v) => {
-                  setLockStretch(false);
-                  setStretch((s) => {
-                    const n = [...s] as [number, number, number];
-                    n[i] = v;
-                    return n;
-                  });
-                }}
-                format={(v) => `${v.toFixed(2)}m`}
-              />
             ))}
           </div>
+          <div className="pointer-events-auto flex gap-1.5">
+            <Chip active={snap} onClick={() => setSnap((s) => !s)}>
+              Snap {snap ? "on" : "off"}
+            </Chip>
+            <Btn onClick={undo} disabled={!objects.length}>
+              Undo
+            </Btn>
+          </div>
+        </div>
+      )}
 
-          {tool === "edit" && selectedIds.length > 0 && (
-            <div className="mt-3">
-              <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                apply profile to selection
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {SHAPES_2D.map((p) => (
-                  <Chip key={p} onClick={() => applyProfileToSelected(p)}>
-                    {p}
-                  </Chip>
-                ))}
-                <Chip onClick={() => updateSelected((o) => ({ ...o, profile: null }))}>
-                  none
-                </Chip>
+      {/* Alignment readout */}
+      {alignedAxes.length > 0 && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-40 -translate-x-1/2 rounded-md border border-axis-y/60 bg-panel/85 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-axis-y backdrop-blur-md">
+          aligned on {alignedAxes.join(" · ")}
+        </div>
+      )}
+
+      {/* Bottom: focused strip or the category bar */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col gap-2 p-2">
+        {focused && !collapsed && (
+          <div className="pointer-events-auto mx-auto w-full max-w-[520px] rounded-lg border border-grid-line bg-panel/95 px-2.5 py-2 shadow-hud backdrop-blur-md">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
+                {CATS.find((c) => c.id === cat)?.label}
+              </span>
+              <div className="flex gap-1.5">
+                <Btn onClick={() => setCollapsed(true)}>Hide</Btn>
+                <Btn onClick={() => setCat(null)}>✕</Btn>
               </div>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Controls panel */}
-      {panel === "settings" && (
-        <div className="pointer-events-auto absolute right-3 top-14 z-40 max-h-[68vh] w-[min(92vw,340px)] overflow-y-auto rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
-          <button type="button" onClick={() => setPanel("none")} aria-label="close panel" className="float-right -mt-1 rounded-md border border-grid-line px-2 py-0.5 font-mono text-[11px] text-muted-foreground">✕</button>
-          <Slider
-            label="speed"
-            value={speed}
-            min={0.1}
-            max={2}
-            step={0.05}
-            onChange={setSpeed}
-            format={(v) => `${Math.round(v * 100)}%`}
-          />
-          <div className="flex flex-wrap gap-1.5">
-            <Chip active={precision} onClick={() => setPrecision((p) => !p)}>
-              Precision {precision ? "on" : "off"}
-            </Chip>
-            <Chip active={shapeSnap} onClick={() => setShapeSnap((s) => !s)}>
-              Shape snap {shapeSnap ? "on" : "off"}
-            </Chip>
-            <Chip active={!!tapPoint} onClick={clearTap}>
-              {tapPoint ? "Clear tap target" : "No tap target"}
-            </Chip>
-          </div>
-          <p className="mt-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
-            Precision drops joystick speed to 15% for fine positioning. In Place mode,
-            tap any face to pin the next shape there.
-          </p>
-        </div>
-      )}
-
-      {/* AI panel */}
-      {panel === "ai" && (
-        <div className="pointer-events-auto absolute right-3 top-14 z-40 w-[min(92vw,340px)] rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. a 4m brick wall with an arched doorway"
-            rows={3}
-            className="w-full resize-none rounded-md border border-grid-line bg-background/60 px-2 py-1.5 font-mono text-[11px] outline-none focus:border-accent"
-          />
-          <div className="mt-1.5 flex gap-1.5">
-            <Btn onClick={runAi} disabled={aiBusy || !prompt.trim()}>
-              {aiBusy ? "Building…" : "Build"}
-            </Btn>
-            {aiIds.length > 0 && (
-              <>
-                <Btn onClick={acceptAi}>Keep</Btn>
-                <Btn onClick={() => rejectAi("undone by user")}>Undo</Btn>
-              </>
-            )}
-          </div>
-          {aiSummary && (
-            <p className="mt-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
-              {aiSummary} — {aiSteps.length} steps.
-            </p>
-          )}
-          <div className="mt-3 border-t border-grid-line pt-2">
-            <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              builder memory
-            </p>
-            <input
-              value={prefs.notes}
-              onChange={(e) => {
-                const next = { ...prefs, notes: e.target.value };
-                setPrefs(next);
-                savePrefs(next);
-              }}
-              placeholder="style notes it should always follow"
-              className="w-full rounded-md border border-grid-line bg-background/60 px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
-            />
-            <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-              Keeps your preferences and every kept/undone build as context, so it
-              matches how you build over time.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Style panel */}
-      {panel === "style" && (
-        <div className="pointer-events-auto absolute right-3 top-14 z-40 max-h-[68vh] w-[min(92vw,340px)] overflow-y-auto rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
-          <button type="button" onClick={() => setPanel("none")} aria-label="close panel" className="float-right -mt-1 rounded-md border border-grid-line px-2 py-0.5 font-mono text-[11px] text-muted-foreground">✕</button>
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {SWATCHES.map((c) => (
-              <button
-                key={c}
-                type="button"
-                aria-label={`color ${c}`}
-                onClick={() => {
-                  const next = { ...material, color: c };
-                  setMaterial(next);
-                  if (tool === "edit") applyMaterialToSelected(next);
-                }}
-                className={`h-7 w-7 rounded-md border ${
-                  material.color === c ? "border-accent" : "border-grid-line"
-                }`}
-                style={{ backgroundColor: c }}
-              />
-            ))}
-            <input
-              type="color"
-              aria-label="custom color"
-              value={material.color}
-              onChange={(e) => {
-                const next = { ...material, color: e.target.value };
-                setMaterial(next);
-                if (tool === "edit") applyMaterialToSelected(next);
-              }}
-              className="h-7 w-9 rounded-md border border-grid-line bg-transparent"
-            />
-          </div>
-          {(["metalness", "roughness"] as const).map((key) => (
-            <Slider
-              key={key}
-              label={key.slice(0, 5)}
-              value={material[key]}
-              min={0}
-              max={1}
-              step={0.05}
-              onChange={(v) => {
-                const next = { ...material, [key]: v };
-                setMaterial(next);
-                if (tool === "edit") applyMaterialToSelected(next);
-              }}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Scenes panel */}
-      {panel === "scenes" && (
-        <div className="pointer-events-auto absolute right-3 top-14 z-40 w-[min(88vw,280px)] rounded-lg border border-grid-line bg-panel/95 p-3 shadow-hud backdrop-blur-md">
-          <div className="mb-2 flex gap-1.5">
-            <input
-              value={sceneName}
-              onChange={(e) => setSceneName(e.target.value)}
-              placeholder="scene name"
-              className="min-w-0 flex-1 rounded-md border border-grid-line bg-background/60 px-2 py-1 font-mono text-[11px] outline-none focus:border-accent"
-            />
-            <Btn onClick={doSave}>Save</Btn>
-          </div>
-          <div className="max-h-40 space-y-1 overflow-y-auto">
-            {scenes.length === 0 && (
-              <p className="font-mono text-[10px] text-muted-foreground">
-                No saved scenes yet.
-              </p>
-            )}
-            {scenes.map((n) => (
-              <div key={n} className="flex items-center gap-1.5">
-                <span className="flex-1 truncate font-mono text-[11px]">{n}</span>
-                <Btn
-                  onClick={() => {
-                    const loaded = loadScene(n);
-                    if (loaded) {
-                      setObjects(loaded.map((o) => hydrateObject(o)));
-                      setSelectedIds([]);
-                    }
-                  }}
-                >
-                  Load
-                </Btn>
-                <Btn
-                  onClick={() => {
-                    deleteScene(n);
-                    setScenes(listScenes());
-                  }}
-                >
-                  ✕
-                </Btn>
-              </div>
-            ))}
-          </div>
-          <div className="mt-2 flex gap-1.5">
-            <Btn
-              onClick={() => {
-                setObjects([]);
-                setSelectedIds([]);
-              }}
-            >
-              New
-            </Btn>
-            <span className="self-center font-mono text-[10px] text-muted-foreground">
-              {objects.length} objects
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Bottom controls */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col gap-2 p-3">
-        <div className="pointer-events-auto mx-auto flex flex-wrap items-center justify-center gap-1.5 rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            step
-          </span>
-          {STEPS.map((s) => (
-            <Chip key={s} active={step === s} onClick={() => setStep(s)}>
-              {s}
-            </Chip>
-          ))}
-          <div className="mx-1 h-4 w-px bg-grid-line" />
-          <Btn
-            onClick={() =>
-              tool === "edit"
-                ? resizeSelected(-1)
-                : setSize((v) => {
-                    const n = Math.max(0.001, +(v - step).toFixed(6));
-                    setLockStretch(true);
-                    return n;
-                  })
-            }
-          >
-            −
-          </Btn>
-          <span className="min-w-16 text-center font-mono text-[11px]">
-            {size.toFixed(3)}
-          </span>
-          <Btn
-            onClick={() =>
-              tool === "edit"
-                ? resizeSelected(1)
-                : setSize((v) => {
-                    const n = +(v + step).toFixed(6);
-                    setLockStretch(true);
-                    return n;
-                  })
-            }
-          >
-            +
-          </Btn>
-        </div>
-
-        {tool === "edit" && selectedIds.length > 0 && (
-          <div className="pointer-events-auto mx-auto flex max-h-32 flex-wrap items-center justify-center gap-1.5 overflow-y-auto rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
-            {(
-              [
-                [0, "X", "text-axis-x"],
-                [1, "Y", "text-axis-y"],
-                [2, "Z", "text-axis-z"],
-              ] as const
-            ).map(([axis, label, cls]) => (
-              <span key={label} className="flex items-center gap-1">
-                <Btn onClick={() => nudge(axis, -1)}>−</Btn>
-                <span className={`font-mono text-[11px] ${cls}`}>{label}</span>
-                <Btn onClick={() => nudge(axis, 1)}>+</Btn>
-              </span>
-            ))}
-            <div className="mx-1 h-4 w-px bg-grid-line" />
-            {(
-              [
-                [0, "sX"],
-                [1, "sY"],
-                [2, "sZ"],
-              ] as const
-            ).map(([axis, label]) => (
-              <span key={label} className="flex items-center gap-1">
-                <Btn onClick={() => stretchSelected(axis, -1)}>−</Btn>
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {label}
-                </span>
-                <Btn onClick={() => stretchSelected(axis, 1)}>+</Btn>
-              </span>
-            ))}
-            <div className="mx-1 h-4 w-px bg-grid-line" />
-            {ROT_STEPS.map((r) => (
-              <Chip key={r} active={rotStep === r} onClick={() => setRotStep(r)}>
-                {r}°
-              </Chip>
-            ))}
-            {(
-              [
-                [0, "rX"],
-                [1, "rY"],
-                [2, "rZ"],
-              ] as const
-            ).map(([axis, label]) => (
-              <span key={label} className="flex items-center gap-1">
-                <Btn onClick={() => rotate(axis, -1)}>↺</Btn>
-                <span className="font-mono text-[11px]">{label}</span>
-                <Btn onClick={() => rotate(axis, 1)}>↻</Btn>
-              </span>
-            ))}
-            <span className="font-mono text-[10px] text-muted-foreground">
-              c {selectionCenter.x.toFixed(2)}/{selectionCenter.y.toFixed(2)}/
-              {selectionCenter.z.toFixed(2)}
-            </span>
+            <div className="max-h-[42vh] overflow-y-auto">{stripBody()}</div>
           </div>
         )}
 
-        <div className="flex items-end justify-between gap-2">
-          {view === "fly" ? (
-            <div className="pointer-events-auto">
-              <Joystick
-                label="move"
-                onChange={(x, y) => {
-                  controls.move.x = x;
-                  controls.move.y = y;
-                }}
-              />
-            </div>
-          ) : (
-            <div className="w-1" />
-          )}
+        {focused && collapsed && (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            className="pointer-events-auto mx-auto rounded-full border border-grid-line bg-panel/85 px-6 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground backdrop-blur-md"
+          >
+            {CATS.find((c) => c.id === cat)?.label} ▲
+          </button>
+        )}
 
-          <div className="pointer-events-auto flex flex-col items-center gap-1.5">
-            <div className="flex gap-1.5">
-              <Chip active={snap} onClick={() => setSnap((s) => !s)}>
-                Snap {snap ? "on" : "off"}
-              </Chip>
-              <Chip active={precision} onClick={() => setPrecision((p) => !p)}>
-                Slow
-              </Chip>
-              <Btn onClick={undo} disabled={!objects.length}>
-                Undo
-              </Btn>
-            </div>
+        {/* Place / measure action button */}
+        {(!focused || cat === "place" || cat === "measure") && (
+          <div className="pointer-events-auto mx-auto">
             {tool === "place" && (
               <button
                 type="button"
@@ -1297,23 +1683,57 @@ export function CadApp() {
                 Add
               </button>
             )}
-            {tool === "measure" && (
-              <button
-                type="button"
-                onClick={() => onMeasurePick(centerPoint.clone())}
-                className="rounded-full border border-accent bg-accent/25 px-6 py-3 font-mono text-sm uppercase tracking-[0.2em] text-foreground shadow-glow backdrop-blur-md active:scale-95"
-              >
-                Mark
-              </button>
-            )}
-            {tool === "cut" && (
+            {tool === "cut" && !focused && (
               <span className="rounded-full border border-grid-line bg-panel/85 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                tap a solid to cut
+                tap a face to cut
               </span>
             )}
           </div>
+        )}
 
-          {view === "fly" ? (
+        {/* Category bar */}
+        <div className="pointer-events-auto mx-auto flex w-full max-w-[520px] gap-1.5 overflow-x-auto rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
+          {CATS.map((c) => (
+            <Chip key={c.id} active={cat === c.id} onClick={() => openCat(c.id)}>
+              {c.label}
+            </Chip>
+          ))}
+        </div>
+
+        {/* Joysticks */}
+        {view === "fly" && sticks && (!focused || collapsed) && (
+          <div className="flex items-end justify-between gap-2">
+            <div className="pointer-events-auto">
+              <Joystick
+                label="move"
+                onChange={(x, y) => {
+                  controls.move.x = x;
+                  controls.move.y = y;
+                }}
+              />
+            </div>
+            <div className="pointer-events-auto flex flex-col gap-1.5">
+              <Btn onClick={() => {}} className="select-none">
+                <span
+                  onPointerDown={() => (controls.lift = 1)}
+                  onPointerUp={() => (controls.lift = 0)}
+                  onPointerLeave={() => (controls.lift = 0)}
+                  className="block"
+                >
+                  ↑
+                </span>
+              </Btn>
+              <Btn onClick={() => {}} className="select-none">
+                <span
+                  onPointerDown={() => (controls.lift = -1)}
+                  onPointerUp={() => (controls.lift = 0)}
+                  onPointerLeave={() => (controls.lift = 0)}
+                  className="block"
+                >
+                  ↓
+                </span>
+              </Btn>
+            </div>
             <div className="pointer-events-auto">
               <Joystick
                 label="pivot"
@@ -1323,11 +1743,17 @@ export function CadApp() {
                 }}
               />
             </div>
-          ) : (
-            <div className="w-1" />
-          )}
-        </div>
+          </div>
+        )}
       </div>
+
+      {/* Selection readout */}
+      {selectedIds.length > 0 && !focused && (
+        <div className="pointer-events-none absolute right-3 top-14 z-40 rounded-md border border-grid-line bg-panel/85 px-2 py-1 font-mono text-[10px] text-muted-foreground backdrop-blur-md">
+          {selectedIds.length} selected · c {selectionCenter.x.toFixed(2)}/
+          {selectionCenter.y.toFixed(2)}/{selectionCenter.z.toFixed(2)}
+        </div>
+      )}
     </main>
   );
 }

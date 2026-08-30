@@ -35,6 +35,32 @@ export type CutOp = {
   scale: [number, number, number];
 };
 
+export type MotionMode = "off" | "linear" | "oscillate" | "orbit";
+
+/** Animated motion attached to an object; never changes its stored position. */
+export type MotionSpec = {
+  mode: MotionMode;
+  /** 0 = X, 1 = Y, 2 = Z — travel axis, or orbit axis for "orbit". */
+  axis: 0 | 1 | 2;
+  /** Travel distance in metres, or orbit radius. */
+  distance: number;
+  /** Metres per second (or radians per second for orbit). */
+  speed: number;
+  /** 0 = constant speed, 1 = fully eased accelerate/decelerate. */
+  accel: number;
+  /** Seconds paused at each end of a leg. */
+  pause: number;
+};
+
+export const DEFAULT_MOTION: MotionSpec = {
+  mode: "off",
+  axis: 0,
+  distance: 2,
+  speed: 1,
+  accel: 0.5,
+  pause: 0.5,
+};
+
 export type PlacedObject = {
   id: string;
   kind: ShapeKind;
@@ -53,11 +79,53 @@ export type PlacedObject = {
   taper: number;
   profile: Shape2D | null;
   ops: CutOp[];
+  motion: MotionSpec | null;
   color: string;
   metalness: number;
   roughness: number;
   groupId: string | null;
 };
+
+/** Animated offset for a motion spec at time `t` seconds. */
+export function motionOffset(m: MotionSpec, t: number): THREE.Vector3 {
+  const out = new THREE.Vector3();
+  if (!m || m.mode === "off") return out;
+  const speed = Math.max(0.0001, m.speed);
+
+  if (m.mode === "orbit") {
+    const a = t * speed;
+    const r = m.distance;
+    if (m.axis === 1) out.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+    else if (m.axis === 0) out.set(0, Math.cos(a) * r, Math.sin(a) * r);
+    else out.set(Math.cos(a) * r, Math.sin(a) * r, 0);
+    return out;
+  }
+
+  const travel = Math.max(0.0001, m.distance / speed);
+  const leg = travel + Math.max(0, m.pause);
+  const pingpong = m.mode === "oscillate";
+  const cycle = pingpong ? leg * 2 : leg;
+  const phase = ((t % cycle) + cycle) % cycle;
+
+  let u: number;
+  if (phase < travel) u = phase / travel;
+  else if (phase < leg) u = 1;
+  else {
+    const back = phase - leg;
+    u = pingpong ? (back < travel ? 1 - back / travel : 0) : 0;
+  }
+
+  // Acceleration curve: blend linear with smoothstep.
+  const eased = u * u * (3 - 2 * u);
+  const k = THREE.MathUtils.clamp(m.accel, 0, 1);
+  const d = (u * (1 - k) + eased * k) * m.distance;
+
+  if (m.axis === 0) out.x = d;
+  else if (m.axis === 1) out.y = d;
+  else out.z = d;
+  return out;
+}
+
 
 export const DEFAULT_MATERIAL: Material = {
   color: "#8fa7bd",
@@ -79,15 +147,21 @@ export const controls = {
   move: { x: 0, y: 0 },
   look: { x: 0, y: 0 },
   lift: 0,
-  /** Global joystick speed multiplier (0.05 – 2). */
+  /** Global joystick speed multiplier (0.05 – 3). */
   speed: 1,
-  /** Precision crawl toggle. */
+  /** Per-channel trims. */
+  moveMul: 1,
+  lookMul: 1,
+  liftMul: 1,
+  /** Precision crawl toggle and the speed it jumps to. */
   precision: false,
+  precisionLevel: 0.2,
 };
 
 export function speedFactor() {
-  return controls.speed * (controls.precision ? 0.15 : 1);
+  return controls.precision ? controls.precisionLevel : controls.speed;
 }
+
 
 /** Live world-space position of the screen-center placement point. */
 export const centerPoint = new THREE.Vector3();
@@ -325,6 +399,8 @@ export function makeObject(
     taper: 0,
     profile: null,
     ops: [],
+    motion: null,
+
     color: material.color,
     metalness: material.metalness,
     roughness: material.roughness,
@@ -350,6 +426,8 @@ export function hydrateObject(o: Partial<PlacedObject> & { id: string }): Placed
     taper: 0,
     profile: null,
     ops: [],
+    motion: null,
+
     color: DEFAULT_MATERIAL.color,
     metalness: DEFAULT_MATERIAL.metalness,
     roughness: DEFAULT_MATERIAL.roughness,
@@ -407,17 +485,76 @@ export function geometryOf(o: PlacedObject): THREE.BufferGeometry {
       taper: 0,
       profile: null,
     });
-    geo = evaluateBoolean(
+    const next = evaluateBoolean(
       geo,
       baseMatrix,
       toolGeo,
       matrixOf(op.position, op.rotation, op.scale),
       op.op,
     );
+    // A failed / empty result is skipped so the object never vanishes.
+    if (next) geo = next;
   }
   _m.identity();
   return geo;
 }
+
+/** World-space bounding box of an object (base shape, ignoring cuts). */
+export function worldBoxOf(o: PlacedObject): THREE.Box3 {
+  const geo = buildGeometry(specOf(o));
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  return geo
+    .boundingBox!.clone()
+    .applyMatrix4(matrixOf(o.position, o.rotation, o.scale ?? [o.size, o.size, o.size]));
+}
+
+/** True when two boxes share volume (a shared face alone does not count). */
+export function boxesOverlap(a: THREE.Box3, b: THREE.Box3, eps = 1e-4) {
+  return (
+    a.min.x < b.max.x - eps &&
+    a.max.x > b.min.x + eps &&
+    a.min.y < b.max.y - eps &&
+    a.max.y > b.min.y + eps &&
+    a.min.z < b.max.z - eps &&
+    a.max.z > b.min.z + eps
+  );
+}
+
+export type AlignHit = { axis: 0 | 1 | 2; value: number; otherId: string };
+
+/**
+ * Axes on which `box` lines up with another object's box — matching centers,
+ * min edges or max edges within `tol`.
+ */
+export function alignmentsFor(
+  box: THREE.Box3,
+  others: { id: string; box: THREE.Box3 }[],
+  tol: number,
+): AlignHit[] {
+  const out: AlignHit[] = [];
+  const keys = ["x", "y", "z"] as const;
+  const c = box.getCenter(new THREE.Vector3());
+  for (const other of others) {
+    const oc = other.box.getCenter(new THREE.Vector3());
+    keys.forEach((k, axis) => {
+      const pairs: [number, number][] = [
+        [c[k], oc[k]],
+        [box.min[k], other.box.min[k]],
+        [box.max[k], other.box.max[k]],
+        [box.min[k], other.box.max[k]],
+        [box.max[k], other.box.min[k]],
+      ];
+      for (const [a, b] of pairs) {
+        if (Math.abs(a - b) <= tol) {
+          out.push({ axis: axis as 0 | 1 | 2, value: b, otherId: other.id });
+          return;
+        }
+      }
+    });
+  }
+  return out;
+}
+
 
 export function cloneObject(o: PlacedObject, offset = 0): PlacedObject {
   return {
