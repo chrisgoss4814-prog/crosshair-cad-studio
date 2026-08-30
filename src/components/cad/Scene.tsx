@@ -20,6 +20,7 @@ import {
   controls,
   flyFocus,
   geometryOf,
+  halfExtentAlong,
   meshRegistry,
   motionOffset,
   publishCenter,
@@ -807,6 +808,8 @@ export function Scene(props: SceneProps) {
         snap={snap}
         grid={grid}
         shapeSnap={shapeSnap}
+        ghostSpec={ghostSpec}
+        ghostScale={ghostScale}
       />
 
       <Grid
