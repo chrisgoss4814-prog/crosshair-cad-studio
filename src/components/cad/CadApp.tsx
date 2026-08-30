@@ -1791,6 +1791,7 @@ export function CadApp() {
           onMeasurePick={onMeasurePick}
           onTapTarget={onTapTarget}
           onCutPick={onCutPick}
+          onLongPress={onLongPress}
         />
       </Canvas>
 
@@ -1837,6 +1838,9 @@ export function CadApp() {
             ))}
           </div>
           <div className="pointer-events-auto flex gap-1.5">
+            <Chip active={precision} onClick={() => setPrecision((p) => !p)}>
+              Fine {precision ? "on" : "off"}
+            </Chip>
             <Chip active={snap} onClick={() => setSnap((s) => !s)}>
               Snap {snap ? "on" : "off"}
             </Chip>
@@ -1881,17 +1885,40 @@ export function CadApp() {
           </button>
         )}
 
+        {/* Recent-shape quick bar */}
+        {tool === "place" && recent.length > 0 && (!focused || cat === "place") && (
+          <div className="pointer-events-auto mx-auto flex max-w-full gap-1.5 overflow-x-auto">
+            {recent.map((r, i) => (
+              <Chip key={i} active={false} onClick={() => applyRecent(r)}>
+                {r.kind} {+r.size.toFixed(3)}
+              </Chip>
+            ))}
+          </div>
+        )}
+
         {/* Place / measure action button */}
         {(!focused || cat === "place" || cat === "measure") && (
-          <div className="pointer-events-auto mx-auto">
+          <div className="pointer-events-auto mx-auto flex items-center gap-2">
             {tool === "place" && (
-              <button
-                type="button"
-                onClick={place}
-                className="rounded-full border border-accent bg-accent/25 px-7 py-3 font-mono text-sm uppercase tracking-[0.2em] text-foreground shadow-glow backdrop-blur-md active:scale-95"
-              >
-                Add
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={place}
+                  className="rounded-full border border-accent bg-accent/25 px-7 py-3 font-mono text-sm uppercase tracking-[0.2em] text-foreground shadow-glow backdrop-blur-md active:scale-95"
+                >
+                  {armed ? "Place here" : "Add"}
+                </button>
+                {armed && (
+                  <Btn onClick={() => setArmed(false)} className="rounded-full">
+                    Cancel
+                  </Btn>
+                )}
+                {!armed && objects.length > 0 && (
+                  <Btn onClick={repeat} className="rounded-full">
+                    Repeat
+                  </Btn>
+                )}
+              </>
             )}
             {tool === "cut" && !focused && (
               <span className="rounded-full border border-grid-line bg-panel/85 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
