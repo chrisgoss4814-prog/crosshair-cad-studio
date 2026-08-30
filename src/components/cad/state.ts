@@ -393,6 +393,8 @@ export function makeObject(
     taper: 0,
     profile: null,
     ops: [],
+    motion: null,
+
     color: material.color,
     metalness: material.metalness,
     roughness: material.roughness,
