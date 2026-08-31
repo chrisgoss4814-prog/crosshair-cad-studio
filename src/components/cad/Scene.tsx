@@ -465,7 +465,7 @@ function ObjectMesh({
   onSelect: (id: string, additive: boolean) => void;
   onMove: (id: string, pos: [number, number, number]) => void;
   onMeasurePick: (p: THREE.Vector3) => void;
-  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3) => void;
+  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => void;
   onCutPick: (id: string, p: THREE.Vector3, n: THREE.Vector3) => void;
   onLongPress: (id: string, x: number, y: number) => void;
 }) {
@@ -545,7 +545,7 @@ function ObjectMesh({
       const n = e.face
         ? e.face.normal.clone().transformDirection(e.object.matrixWorld).normalize()
         : new THREE.Vector3(0, 1, 0);
-      onTapTarget(e.point.clone(), n);
+      onTapTarget(e.point.clone(), n, o.id);
       return;
     }
     if (tool !== "edit") return;
@@ -765,7 +765,7 @@ export type SceneProps = {
   onSelectNone: () => void;
   onMove: (id: string, pos: [number, number, number]) => void;
   onMeasurePick: (p: THREE.Vector3) => void;
-  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3) => void;
+  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => void;
   onCutPick: (id: string, p: THREE.Vector3, n: THREE.Vector3) => void;
   onLongPress: (id: string, x: number, y: number) => void;
 };
@@ -898,7 +898,7 @@ export function Scene(props: SceneProps) {
             onSelectNone();
           } else if (tool === "place") {
             e.stopPropagation();
-            onTapTarget(e.point.clone(), new THREE.Vector3(0, 1, 0));
+            onTapTarget(e.point.clone(), new THREE.Vector3(0, 1, 0), null);
           }
         }}
       >
