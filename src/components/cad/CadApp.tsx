@@ -568,6 +568,11 @@ export function CadApp() {
     }
     setArmed(false);
     const p = centerPoint;
+    // Placing on a tapped face copies that object's rotation so faces stay
+    // parallel and the stack reads square.
+    const faceHost = tapTarget.objectId
+      ? objects.find((o) => o.id === tapTarget.objectId)
+      : null;
     const next = makeObject(kind, [p.x, p.y, p.z], size, material, {
       scale: [...stretch] as [number, number, number],
       sides,
@@ -576,6 +581,7 @@ export function CadApp() {
       bend,
       bendAxis,
       taper,
+      ...(faceHost ? { rotation: [...faceHost.rotation] as [number, number, number] } : {}),
     });
     if (wouldCollide(next, [])) {
       toast.error("Blocked — that spot overlaps another object");
@@ -598,7 +604,17 @@ export function CadApp() {
       const key = JSON.stringify(spec);
       return [spec, ...prev.filter((r) => JSON.stringify(r) !== key)].slice(0, 4);
     });
-    clearTap();
+    // Advance the tap target to the new object's outer face so repeated Add
+    // keeps building the same aligned stack.
+    if (tapTarget.point && tapTarget.normal) {
+      const n = tapTarget.normal.clone();
+      tapTarget.point = new THREE.Vector3(p.x, p.y, p.z);
+      tapTarget.normal = n;
+      tapTarget.objectId = next.id;
+      setTapPoint([p.x, p.y, p.z]);
+    } else {
+      clearTap();
+    }
   };
 
   const applyRecent = (r: RecentSpec) => {
