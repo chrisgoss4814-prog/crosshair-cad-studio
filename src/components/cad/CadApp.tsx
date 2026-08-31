@@ -2279,7 +2279,11 @@ export function CadApp() {
                 onClick={() => {
                   setObjects([]);
                   setSelectedIds([]);
+                  setSketches([]);
+                  setDraft(null);
+                  setSketchSel(null);
                 }}
+
               >
                 New
               </Btn>
