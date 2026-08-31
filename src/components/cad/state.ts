@@ -170,7 +170,8 @@ export const centerPoint = new THREE.Vector3();
 export const tapTarget: {
   point: THREE.Vector3 | null;
   normal: THREE.Vector3 | null;
-} = { point: null, normal: null };
+  objectId: string | null;
+} = { point: null, normal: null, objectId: null };
 
 /** Registry of live placed meshes so the probe can raycast against them. */
 export const meshRegistry = new Map<string, THREE.Mesh>();
