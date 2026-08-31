@@ -300,6 +300,7 @@ function CenterProbe({
   snap,
   grid,
   shapeSnap,
+  alignMode,
   ghostSpec,
   ghostScale,
 }: {
@@ -308,6 +309,7 @@ function CenterProbe({
   snap: boolean;
   grid: number;
   shapeSnap: boolean;
+  alignMode: AlignMode;
   ghostSpec: GeometrySpec;
   ghostScale: [number, number, number];
 }) {
@@ -343,10 +345,19 @@ function CenterProbe({
     sceneRefs.height = viewport.height;
 
     if (tapTarget.point) {
-      // Rest the pending shape on the tapped face instead of merging into it.
-      centerPoint.copy(tapTarget.point);
+      // Rest the pending shape on the tapped face, aligned across it.
       const n = tapTarget.normal;
-      if (n) centerPoint.addScaledVector(n, halfFor(n));
+      const targetMesh = tapTarget.objectId
+        ? meshRegistry.get(tapTarget.objectId)
+        : null;
+      if (n && targetMesh) {
+        centerPoint.copy(
+          alignOnFace(meshWorldBox(targetMesh), n, half, alignMode),
+        );
+      } else {
+        centerPoint.copy(tapTarget.point);
+        if (n) centerPoint.addScaledVector(n, halfFor(n));
+      }
       accum.current += delta;
       if (accum.current >= 1 / 30) {
         accum.current = 0;
@@ -367,6 +378,8 @@ function CenterProbe({
       grid,
       shapeSnap,
       halfFor,
+      half,
+      alignMode,
     });
     centerPoint.copy(point);
 
@@ -750,6 +763,7 @@ export type SceneProps = {
   depth: number;
   snap: boolean;
   shapeSnap: boolean;
+  alignMode: AlignMode;
   grid: number;
   dragStep: number;
   playing: boolean;
@@ -782,6 +796,7 @@ export function Scene(props: SceneProps) {
     depth,
     snap,
     shapeSnap,
+    alignMode,
     grid,
     dragStep,
     playing,
@@ -862,6 +877,7 @@ export function Scene(props: SceneProps) {
         snap={snap}
         grid={grid}
         shapeSnap={shapeSnap}
+        alignMode={alignMode}
         ghostSpec={ghostSpec}
         ghostScale={ghostScale}
       />
