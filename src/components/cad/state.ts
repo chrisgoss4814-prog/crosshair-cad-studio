@@ -753,3 +753,30 @@ export function resolveMove(
   return out;
 }
 
+/**
+ * Swept solid move: the delta is subdivided so a fast drag can never tunnel
+ * through a thin object. Each sub-step is resolved axis by axis, so a blocked
+ * object still slides along the surface it hit.
+ */
+export function resolveMoveSwept(
+  box: THREE.Box3,
+  delta: THREE.Vector3,
+  others: THREE.Box3[],
+  maxStep = 0.2,
+): THREE.Vector3 {
+  const len = delta.length();
+  if (len <= maxStep || !others.length) return resolveMove(box, delta, others);
+  const steps = Math.min(48, Math.ceil(len / maxStep));
+  const inc = delta.clone().divideScalar(steps);
+  const cur = box.clone();
+  const total = new THREE.Vector3();
+  for (let i = 0; i < steps; i++) {
+    const allowed = resolveMove(cur, inc, others);
+    total.add(allowed);
+    cur.translate(allowed);
+    if (allowed.lengthSq() === 0) break;
+  }
+  return total;
+}
+
+
