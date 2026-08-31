@@ -208,6 +208,13 @@ export const HELP_ORDER: string[] = [
   "view",
   "focus",
   "place",
+  "line",
+  "linePoint",
+  "lineUndo",
+  "lineFinish",
+  "lineSnap",
+  "lineCurve",
+
   "repeat",
   "recent",
   "confirm",
