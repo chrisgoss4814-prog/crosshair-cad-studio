@@ -299,13 +299,58 @@ export function halfExtentAlong(half: THREE.Vector3, n: THREE.Vector3) {
   );
 }
 
+export type AlignMode = "center" | "min" | "max";
+
+/** World-space bounding box of a live mesh. */
+export function meshWorldBox(mesh: THREE.Object3D): THREE.Box3 {
+  mesh.updateMatrixWorld();
+  const m = mesh as THREE.Mesh;
+  const geo = m.geometry;
+  if (geo) {
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    return geo.boundingBox!.clone().applyMatrix4(m.matrixWorld);
+  }
+  return new THREE.Box3().setFromObject(mesh);
+}
+
+/**
+ * Center point for a pending shape so it rests flush on a face of `targetBox`
+ * and lines up across that face — the two cross axes centre (or sit flush with
+ * the min / max edge), so equal shapes stack with no overhang.
+ */
+export function alignOnFace(
+  targetBox: THREE.Box3,
+  normal: THREE.Vector3,
+  half: THREE.Vector3,
+  mode: AlignMode = "center",
+): THREE.Vector3 {
+  const keys = ["x", "y", "z"] as const;
+  const abs = [Math.abs(normal.x), Math.abs(normal.y), Math.abs(normal.z)];
+  const axis = abs.indexOf(Math.max(...abs));
+  const c = targetBox.getCenter(new THREE.Vector3());
+  const out = new THREE.Vector3();
+  keys.forEach((k, i) => {
+    if (i === axis) {
+      const positive = normal[k] >= 0;
+      out[k] = positive
+        ? targetBox.max[k] + half[k]
+        : targetBox.min[k] - half[k];
+    } else if (mode === "min") {
+      out[k] = targetBox.min[k] + half[k];
+    } else if (mode === "max") {
+      out[k] = targetBox.max[k] - half[k];
+    } else {
+      out[k] = c[k];
+    }
+  });
+  return out;
+}
+
 /**
  * Resolve the world point under the screen center.
  *
- * Priority when snapping is on: shape snap point -> object face -> ground
- * plane -> free depth. A face hit offsets by the placed shape's true half
- * extent along the face normal, so it rests exactly on the surface instead of
- * sinking halfway in.
+ * Priority when snapping is on: object face (aligned + flush) -> ground plane
+ * -> free depth.
  */
 export function computeCenterPoint(
   camera: THREE.Camera,
@@ -318,6 +363,9 @@ export function computeCenterPoint(
     shapeSnap?: boolean;
     /** Half extent of the pending shape along a direction (defaults to size/2). */
     halfFor?: (n: THREE.Vector3) => number;
+    /** Per-axis half extents of the pending shape, for face alignment. */
+    half?: THREE.Vector3;
+    alignMode?: AlignMode;
   },
 ): { point: THREE.Vector3; onSurface: boolean; snapped: boolean } {
   const grid = opts.grid ?? SNAP;
@@ -335,15 +383,14 @@ export function computeCenterPoint(
         .normalize();
       const off = halfFor(_normal);
 
-      if (opts.shapeSnap !== false) {
-        const near = nearestSnapPoint(hit.point, Math.max(0.4, opts.size * 0.75));
-        if (near) {
-          return {
-            point: near.clone().addScaledVector(_normal, off),
-            onSurface: true,
-            snapped: true,
-          };
-        }
+      // Face alignment: sit flush on the face and centre across it.
+      if (opts.half && opts.shapeSnap !== false) {
+        const box = meshWorldBox(hit.object);
+        return {
+          point: alignOnFace(box, _normal, opts.half, opts.alignMode ?? "center"),
+          onSurface: true,
+          snapped: true,
+        };
       }
 
       _point.copy(hit.point).addScaledVector(_normal, off);
@@ -358,6 +405,7 @@ export function computeCenterPoint(
 
       return { point: _point.clone(), onSurface: true, snapped: false };
     }
+
   }
 
   if (opts.snap && raycaster.ray.intersectPlane(GROUND, _point)) {
