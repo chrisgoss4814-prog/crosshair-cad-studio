@@ -48,3 +48,40 @@ export function loadAuto(): PlacedObject[] | null {
     return (JSON.parse(raw) as PlacedObject[]).map((o) => hydrateObject(o));
   }, null);
 }
+
+// ---------------------------------------------------------------------------
+// Sketches (line work) are stored alongside each scene under its own key so
+// older saves keep loading unchanged.
+// ---------------------------------------------------------------------------
+
+const SKETCH_SUFFIX = ":sketches";
+
+export function saveSketches(name: string, sketches: unknown[]) {
+  safe(
+    () =>
+      localStorage.setItem(PREFIX + name + SKETCH_SUFFIX, JSON.stringify(sketches)),
+    null,
+  );
+}
+
+export function loadSketches(name: string): unknown[] {
+  return safe(() => {
+    const raw = localStorage.getItem(PREFIX + name + SKETCH_SUFFIX);
+    return raw ? (JSON.parse(raw) as unknown[]) : [];
+  }, []);
+}
+
+export function deleteSketches(name: string) {
+  safe(() => localStorage.removeItem(PREFIX + name + SKETCH_SUFFIX), null);
+}
+
+export function autoSaveSketches(sketches: unknown[]) {
+  safe(() => localStorage.setItem(AUTO + SKETCH_SUFFIX, JSON.stringify(sketches)), null);
+}
+
+export function loadAutoSketches(): unknown[] {
+  return safe(() => {
+    const raw = localStorage.getItem(AUTO + SKETCH_SUFFIX);
+    return raw ? (JSON.parse(raw) as unknown[]) : [];
+  }, []);
+}

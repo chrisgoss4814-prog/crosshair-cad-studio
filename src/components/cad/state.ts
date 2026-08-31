@@ -13,7 +13,7 @@ export type { ShapeKind, Shape2D } from "./geometry";
 export { is2D, SHAPES_2D, SHAPES_3D } from "./geometry";
 
 export type ViewMode = "fly" | "orbit" | "top";
-export type ToolMode = "place" | "edit" | "measure" | "cut";
+export type ToolMode = "place" | "edit" | "measure" | "cut" | "line";
 export type DragPlaneMode = "horizontal" | "facing";
 
 export type Material = {

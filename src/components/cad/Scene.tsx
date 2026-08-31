@@ -13,6 +13,9 @@ import {
 } from "@react-three/drei";
 import * as THREE from "three";
 import { buildGeometry, type GeometrySpec } from "./geometry";
+import { SketchLayer } from "./SketchLayer";
+import type { Sketch, SketchSnapPrefs, Vec3 } from "./sketch";
+
 import {
   alignmentsFor,
   centerPoint,
@@ -467,6 +470,7 @@ function ObjectMesh({
   onMove,
   onMeasurePick,
   onTapTarget,
+  onSketchTap,
   onCutPick,
   onLongPress,
 }: {
@@ -482,9 +486,11 @@ function ObjectMesh({
   onMove: (id: string, pos: [number, number, number]) => void;
   onMeasurePick: (p: THREE.Vector3) => void;
   onTapTarget: (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => void;
+  onSketchTap: (p: THREE.Vector3, n: THREE.Vector3) => void;
   onCutPick: (id: string, p: THREE.Vector3, n: THREE.Vector3) => void;
   onLongPress: (id: string, x: number, y: number) => void;
 }) {
+
   const ref = useRef<THREE.Mesh>(null);
   const { camera } = useThree();
   const dragging = useRef(false);
@@ -548,6 +554,15 @@ function ObjectMesh({
       onMeasurePick(e.point.clone());
       return;
     }
+    if (tool === "line") {
+      e.stopPropagation();
+      const n = e.face
+        ? e.face.normal.clone().transformDirection(e.object.matrixWorld).normalize()
+        : new THREE.Vector3(0, 1, 0);
+      onSketchTap(e.point.clone(), n);
+      return;
+    }
+
     if (tool === "cut") {
       e.stopPropagation();
       const n = e.face
@@ -778,11 +793,20 @@ export type SceneProps = {
   measureB: [number, number, number] | null;
   tapPoint: [number, number, number] | null;
   cutPreview: CutPreview | null;
+  sketches: Sketch[];
+  sketchDraft: Sketch | null;
+  sketchSnap: SketchSnapPrefs;
+  sketchSelectedId: string | null;
+  sketchSelectedSeg: number | null;
   onSelect: (id: string, additive: boolean) => void;
   onSelectNone: () => void;
   onMove: (id: string, pos: [number, number, number]) => void;
   onMeasurePick: (p: THREE.Vector3) => void;
   onTapTarget: (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => void;
+  onSketchTap: (p: THREE.Vector3, n: THREE.Vector3) => void;
+  onSketchPickSegment: (id: string, seg: number) => void;
+  onSketchMovePoint: (id: string, index: number, p: Vec3) => void;
+  onSketchMoveHandle: (id: string, seg: number, which: "h1" | "h2", p: Vec3) => void;
   onCutPick: (id: string, p: THREE.Vector3, n: THREE.Vector3) => void;
   onLongPress: (id: string, x: number, y: number) => void;
 };
@@ -811,14 +835,24 @@ export function Scene(props: SceneProps) {
     measureB,
     tapPoint,
     cutPreview,
+    sketches,
+    sketchDraft,
+    sketchSnap,
+    sketchSelectedId,
+    sketchSelectedSeg,
     onSelect,
     onSelectNone,
     onMove,
     onMeasurePick,
     onTapTarget,
+    onSketchTap,
+    onSketchPickSegment,
+    onSketchMovePoint,
+    onSketchMoveHandle,
     onCutPick,
     onLongPress,
   } = props;
+
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -915,6 +949,9 @@ export function Scene(props: SceneProps) {
             onMeasurePick(e.point.clone());
           } else if (tool === "edit") {
             onSelectNone();
+          } else if (tool === "line") {
+            e.stopPropagation();
+            onSketchTap(e.point.clone(), new THREE.Vector3(0, 1, 0));
           } else if (tool === "place") {
             e.stopPropagation();
             onTapTarget(e.point.clone(), new THREE.Vector3(0, 1, 0), null);
@@ -946,10 +983,25 @@ export function Scene(props: SceneProps) {
           onMove={onMove}
           onMeasurePick={onMeasurePick}
           onTapTarget={onTapTarget}
+          onSketchTap={onSketchTap}
           onCutPick={onCutPick}
           onLongPress={onLongPress}
         />
       ))}
+
+      <SketchLayer
+        sketches={sketches}
+        draft={sketchDraft}
+        drawing={tool === "line"}
+        selectedId={sketchSelectedId}
+        selectedSeg={sketchSelectedSeg}
+        prefs={sketchSnap}
+        grid={grid}
+        onPickSegment={onSketchPickSegment}
+        onMovePoint={onSketchMovePoint}
+        onMoveHandle={onSketchMoveHandle}
+      />
+
 
       {showGuides && tool === "edit" && (
         <AlignGuides

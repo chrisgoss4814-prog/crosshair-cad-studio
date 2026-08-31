@@ -169,7 +169,34 @@ export const HELP: Record<string, HelpEntry> = {
   },
   files: { title: "Files", body: "Save, load and delete named scenes in this browser." },
   undo: { title: "Undo", body: "Removes the most recently placed object." },
+
+  // Sketch lines
+  line: {
+    title: "Line tool",
+    body: "Draws connected line segments in 3D. Tap a surface or use + Point to drop each point; close the loop back on the first point to fill or extrude it.",
+  },
+  linePoint: {
+    title: "Add point",
+    body: "Drops a sketch point where the axis lines cross, using the same snapping as tapping a surface.",
+  },
+  lineUndo: {
+    title: "Undo point",
+    body: "Removes the last point you placed in the line you are drawing.",
+  },
+  lineFinish: {
+    title: "Finish line",
+    body: "Ends the current line and keeps it as an editable open path.",
+  },
+  lineSnap: {
+    title: "Line snapping",
+    body: "Chooses what pulls a new point into place: other line ends, segment midpoints, solid corners and faces, or the grid with a 15° angle lock.",
+  },
+  lineCurve: {
+    title: "Curve segment",
+    body: "Turns the selected straight segment into a bezier curve with two draggable handles. Tap again to straighten it.",
+  },
 };
+
 
 export const HELP_ORDER: string[] = [
   "nav",
@@ -181,6 +208,13 @@ export const HELP_ORDER: string[] = [
   "view",
   "focus",
   "place",
+  "line",
+  "linePoint",
+  "lineUndo",
+  "lineFinish",
+  "lineSnap",
+  "lineCurve",
+
   "repeat",
   "recent",
   "confirm",
