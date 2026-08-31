@@ -36,12 +36,14 @@ import {
   boxesOverlap,
   requestFlyFocus,
   resolveMove,
+  resolveMoveSwept,
   sceneRefs,
   selectionFocusState,
   SNAP,
   STEPS,
   SWATCHES,
   tapTarget,
+  type AlignMode,
   worldBoxOf,
   type CutOp,
   type DragPlaneMode,
@@ -393,7 +395,8 @@ export function CadApp() {
   const [depth, setDepth] = useState(6);
   const [snap, setSnap] = useState(true);
   const [shapeSnap, setShapeSnap] = useState(true);
-  const [blockOverlap, setBlockOverlap] = useState(false);
+  const [blockOverlap, setBlockOverlap] = useState(true);
+  const [alignMode, setAlignMode] = useState<AlignMode>("center");
   const [showGuides, setShowGuides] = useState(true);
   const [dragStep, setDragStep] = useState(0);
   const [material, setMaterial] = useState<Material>(DEFAULT_MATERIAL);
@@ -542,6 +545,7 @@ export function CadApp() {
   const clearTap = () => {
     tapTarget.point = null;
     tapTarget.normal = null;
+    tapTarget.objectId = null;
     setTapPoint(null);
   };
 
@@ -664,7 +668,7 @@ export function CadApp() {
           const blockers = prev
             .filter((o) => !ids.includes(o.id))
             .map((o) => worldBoxOf(o));
-          const ok = resolveMove(
+          const ok = resolveMoveSwept(
             movingBox,
             new THREE.Vector3(dx, dy, dz),
             blockers,
@@ -689,7 +693,7 @@ export function CadApp() {
         );
         // Magnetic alignment: a single dragged object softly snaps into
         // perfect line-up with neighbours.
-        if (magnet && ids.length === 1 && !blockOverlap) {
+        if (magnet && ids.length === 1) {
           const target = moved.find((o) => o.id === ids[0]);
           if (target) {
             const box = worldBoxOf(target);
@@ -724,18 +728,23 @@ export function CadApp() {
   );
 
 
-  const onTapTarget = useCallback((p: THREE.Vector3, n: THREE.Vector3) => {
-    if (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001) {
-      tapTarget.point = null;
-      tapTarget.normal = null;
-      setTapPoint(null);
-      return;
-    }
-    const point = p.clone();
-    tapTarget.point = point;
-    tapTarget.normal = n.clone();
-    setTapPoint([point.x, point.y, point.z]);
-  }, []);
+  const onTapTarget = useCallback(
+    (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => {
+      if (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001) {
+        tapTarget.point = null;
+        tapTarget.normal = null;
+        tapTarget.objectId = null;
+        setTapPoint(null);
+        return;
+      }
+      const point = p.clone();
+      tapTarget.point = point;
+      tapTarget.normal = n.clone();
+      tapTarget.objectId = id;
+      setTapPoint([point.x, point.y, point.z]);
+    },
+    [],
+  );
 
   // --- cut ------------------------------------------------------------------
 
@@ -1940,6 +1949,7 @@ export function CadApp() {
           onSelectNone={() => setSelectedIds([])}
           onMove={handleMove}
           onMeasurePick={onMeasurePick}
+          alignMode={alignMode}
           onTapTarget={onTapTarget}
           onCutPick={onCutPick}
           onLongPress={onLongPress}
