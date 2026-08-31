@@ -6,6 +6,8 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
+
 } from "react";
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
@@ -35,7 +37,9 @@ import {
   makeObject,
   boxesOverlap,
   requestFlyFocus,
+  nearestSnapPoint,
   resolveMove,
+
   resolveMoveSwept,
   sceneRefs,
   selectionFocusState,
@@ -56,13 +60,39 @@ import {
 } from "./state";
 import {
   autoSave,
+  autoSaveSketches,
   deleteScene,
+  deleteSketches,
   listScenes,
   loadAuto,
+  loadAutoSketches,
   loadScene,
+  loadSketches,
   saveScene,
+  saveSketches,
 } from "@/lib/scene-store";
+import {
+  cloneSketch,
+  DEFAULT_SKETCH_SNAP,
+  defaultHandles,
+  getSketchLabel,
+  hydrateSketch,
+  makeSketch,
+  mirrorHandle,
+  movePoint,
+  resolveSketchPoint,
+  
+  sketchCursor,
+  sketchLength,
+  subscribeSketchLabel,
+  translateSketch,
+  v as vec,
+  type Sketch,
+  type SketchSnapPrefs,
+  type Vec3,
+} from "./sketch";
 import { aiBuild, type BuildStep } from "@/lib/ai-build.functions";
+
 import {
   DEFAULT_PREFS,
   examplesPrompt,
@@ -83,6 +113,7 @@ const VIEWS: { id: ViewMode; label: string }[] = [
 type Cat =
   | "move"
   | "place"
+  | "line"
   | "edit"
   | "stretch"
   | "cut"
@@ -96,6 +127,7 @@ type Cat =
 const CATS: { id: Cat; label: string; tool: ToolMode | null }[] = [
   { id: "move", label: "Move", tool: null },
   { id: "place", label: "Place", tool: "place" },
+  { id: "line", label: "Line", tool: "line" },
   { id: "edit", label: "Edit", tool: "edit" },
   { id: "stretch", label: "Size", tool: "edit" },
   { id: "cut", label: "Cut", tool: "cut" },
@@ -110,6 +142,7 @@ const CATS: { id: Cat; label: string; tool: ToolMode | null }[] = [
 const CAT_HELP: Record<string, string> = {
   move: "nav",
   place: "place",
+  line: "line",
   edit: "multi",
   stretch: "stretchAxes",
   cut: "cut",
@@ -120,6 +153,7 @@ const CAT_HELP: Record<string, string> = {
   ai: "ai",
   files: "files",
 };
+
 
 const ROT_STEPS = [1, 5, 15, 90];
 const PREFS_KEY = "vb.controls.v1";
@@ -471,12 +505,30 @@ export function CadApp() {
   const beforeAi = useRef<PlacedObject[] | null>(null);
   const lastPrompt = useRef("");
 
+  // Sketch (line / curve) state
+  const [sketches, setSketches] = useState<Sketch[]>([]);
+  const [draft, setDraft] = useState<Sketch | null>(null);
+  const [sketchSnap, setSketchSnap] = useState<SketchSnapPrefs>(DEFAULT_SKETCH_SNAP);
+  const [sketchSel, setSketchSel] = useState<string | null>(null);
+  const [sketchSeg, setSketchSeg] = useState<number | null>(null);
+  const [closeAsk, setCloseAsk] = useState<string | null>(null);
+  const snapLabel = useSyncExternalStore(
+    subscribeSketchLabel,
+    getSketchLabel,
+    () => null,
+  );
+
   const grid = snap ? Math.max(step, 0.001) : SNAP;
+
 
   useEffect(() => {
     const restored = loadAuto();
     if (restored?.length) setObjects(restored);
+    const lines = loadAutoSketches();
+    if (lines.length)
+      setSketches(lines.map((s) => hydrateSketch(s as Partial<Sketch>)));
     setScenes(listScenes());
+
     setPrefs(loadPrefs());
     try {
       const raw = localStorage.getItem(PREFS_KEY);
@@ -498,6 +550,156 @@ export function CadApp() {
   useEffect(() => {
     autoSave(objects);
   }, [objects]);
+
+  useEffect(() => {
+    autoSaveSketches(sketches);
+  }, [sketches]);
+
+  // --- Sketch actions -------------------------------------------------------
+
+  /** Snap a raw world point the same way the live cursor does. */
+  const snapSketchPoint = useCallback(
+    (raw: THREE.Vector3) =>
+      resolveSketchPoint(raw, {
+        sketches,
+        draft,
+        prefs: sketchSnap,
+        grid,
+        tol: Math.max(0.15, grid * 1.2),
+        objectSnap: (p, t) => nearestSnapPoint(p, t),
+      }).point,
+    [sketches, draft, sketchSnap, grid],
+  );
+
+  const pushSketchPoint = useCallback(
+    (world: THREE.Vector3, normal?: THREE.Vector3) => {
+      const p = snapSketchPoint(world);
+      const at: Vec3 = [p.x, p.y, p.z];
+      setDraft((d) => {
+        if (!d) {
+          const n: Vec3 = normal
+            ? [normal.x, normal.y, normal.z]
+            : [0, 1, 0];
+          return makeSketch(at, n);
+        }
+        const first = d.points[0];
+        // Snapping back onto the first point closes the loop.
+        if (first && d.points.length > 2 && vec(first).distanceTo(p) < 1e-4) {
+          setCloseAsk(d.id);
+          return { ...d, closed: true };
+        }
+        return {
+          ...d,
+          points: [...d.points, at],
+          segments: [...d.segments, { h1: null, h2: null }],
+        };
+      });
+    },
+    [snapSketchPoint],
+  );
+
+  /** Add a point where the on-screen cursor currently sits. */
+  const addSketchPoint = useCallback(() => {
+    pushSketchPoint(sketchCursor.point.clone());
+  }, [pushSketchPoint]);
+
+  const undoSketchPoint = () => {
+    setDraft((d) => {
+      if (!d) return d;
+      if (d.closed) return { ...d, closed: false, filled: false, extrude: 0 };
+      if (d.points.length <= 1) return null;
+      return {
+        ...d,
+        points: d.points.slice(0, -1),
+        segments: d.segments.slice(0, -1),
+      };
+    });
+    setCloseAsk(null);
+  };
+
+  const finishSketch = useCallback(
+    (mode: "lines" | "fill" | "extrude" = "lines") => {
+      setDraft((d) => {
+        if (!d || d.points.length < 2) return null;
+        const done: Sketch = {
+          ...d,
+          filled: mode === "fill",
+          extrude: mode === "extrude" ? Math.max(step, 0.1) : 0,
+        };
+        setSketches((list) => [...list, done]);
+        setSketchSel(done.id);
+        return null;
+      });
+      setCloseAsk(null);
+      setSketchSeg(null);
+    },
+    [step],
+  );
+
+  const selectedSketch = useMemo(
+    () => sketches.find((s) => s.id === sketchSel) ?? null,
+    [sketches, sketchSel],
+  );
+
+  const patchSketch = useCallback((id: string, patch: Partial<Sketch>) => {
+    setSketches((list) =>
+      list.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+    );
+  }, []);
+
+  const onSketchTap = useCallback(
+    (p: THREE.Vector3, n: THREE.Vector3) => {
+      pushSketchPoint(p, n);
+    },
+    [pushSketchPoint],
+  );
+
+  const onSketchPickSegment = useCallback((id: string, seg: number) => {
+    setSketchSel(id);
+    setSketchSeg(seg);
+  }, []);
+
+  const onSketchMovePoint = useCallback((id: string, index: number, p: Vec3) => {
+    setSketches((list) =>
+      list.map((s) => (s.id === id ? movePoint(s, index, p) : s)),
+    );
+    setDraft((d) => (d && d.id === id ? movePoint(d, index, p) : d));
+  }, []);
+
+  const onSketchMoveHandle = useCallback(
+    (id: string, seg: number, which: "h1" | "h2", p: Vec3) => {
+      setSketches((list) =>
+        list.map((s) => {
+          if (s.id !== id) return s;
+          const segments = s.segments.map((x, i) =>
+            i === seg ? { ...x, [which]: p } : x,
+          );
+          // Keep the neighbouring handle opposite so curves stay smooth.
+          return mirrorHandle({ ...s, segments }, seg, which);
+        }),
+      );
+    },
+    [],
+  );
+
+
+  /** Turn the selected straight segment into a bezier (or back). */
+  const toggleSegmentCurve = () => {
+    const s = selectedSketch;
+    if (!s || sketchSeg === null) return;
+    const a = s.points[sketchSeg];
+    const b = s.points[(sketchSeg + 1) % s.points.length];
+    if (!a || !b) return;
+    const seg = s.segments[sketchSeg];
+    const next = [...s.segments];
+    if (seg?.h1) next[sketchSeg] = { h1: null, h2: null };
+    else {
+      const [h1, h2] = defaultHandles(vec(a), vec(b));
+      next[sketchSeg] = { h1, h2 };
+    }
+    patchSketch(s.id, { segments: next });
+  };
+
 
   useEffect(() => {
     controls.speed = speed;
@@ -1110,6 +1312,8 @@ export function CadApp() {
   const doSave = () => {
     const name = sceneName.trim() || `scene-${scenes.length + 1}`;
     saveScene(name, objects);
+    saveSketches(name, sketches);
+
     setScenes(listScenes());
     setSceneName("");
     toast.success(`Saved “${name}”`);
@@ -1297,6 +1501,153 @@ export function CadApp() {
 
   const stripBody = () => {
     switch (cat) {
+      case "line": {
+        const s = selectedSketch;
+        const curved = s && sketchSeg !== null && !!s.segments[sketchSeg]?.h1;
+        return (
+          <>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Btn onClick={addSketchPoint} hint="linePoint">
+                + Point
+              </Btn>
+              <Btn onClick={undoSketchPoint} hint="lineUndo">
+                Undo pt
+              </Btn>
+              <Btn onClick={() => finishSketch("lines")} hint="lineFinish">
+                Finish
+              </Btn>
+              <span className="font-mono text-[10px] text-muted-foreground">
+                {draft
+                  ? `${draft.points.length} pts · ${sketchLength(draft).toFixed(3)}m`
+                  : "tap or + Point to start"}
+                {snapLabel ? ` · ${snapLabel}` : ""}
+              </span>
+            </div>
+
+            {closeAsk && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  loop closed
+                </span>
+                <Btn onClick={() => finishSketch("lines")}>Keep lines</Btn>
+                <Btn onClick={() => finishSketch("fill")}>Fill face</Btn>
+                <Btn onClick={() => finishSketch("extrude")}>Extrude</Btn>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                snap
+              </span>
+              {(
+                [
+                  ["endpoints", "ends"],
+                  ["midpoints", "mids"],
+                  ["objects", "objects"],
+                  ["gridAngle", "grid 15°"],
+                ] as const
+              ).map(([k, label]) => (
+                <Chip
+                  key={k}
+                  active={sketchSnap[k]}
+                  hint="lineSnap"
+                  onClick={() => setSketchSnap((p) => ({ ...p, [k]: !p[k] }))}
+                >
+                  {label}
+                </Chip>
+              ))}
+            </div>
+
+            {s ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {sketchSeg === null ? "sketch" : `seg ${sketchSeg + 1}`}
+                </span>
+                <Btn onClick={toggleSegmentCurve} hint="lineCurve">
+                  {curved ? "Straighten" : "Curve"}
+                </Btn>
+                {s.closed && (
+                  <>
+                    <Chip
+                      active={s.filled && !s.extrude}
+                      onClick={() =>
+                        patchSketch(s.id, { filled: !s.filled, extrude: 0 })
+                      }
+                    >
+                      fill
+                    </Chip>
+                    <Chip
+                      active={s.extrude > 0}
+                      onClick={() =>
+                        patchSketch(s.id, {
+                          extrude: s.extrude > 0 ? 0 : Math.max(step, 0.1),
+                        })
+                      }
+                    >
+                      extrude
+                    </Chip>
+                  </>
+                )}
+                {s.extrude > 0 && (
+                  <>
+                    <Btn
+                      onClick={() =>
+                        patchSketch(s.id, {
+                          extrude: Math.max(0.001, s.extrude - step),
+                        })
+                      }
+                    >
+                      −
+                    </Btn>
+                    <span className="font-mono text-[11px]">
+                      {s.extrude.toFixed(3)}
+                    </span>
+                    <Btn
+                      onClick={() => patchSketch(s.id, { extrude: s.extrude + step })}
+                    >
+                      +
+                    </Btn>
+                  </>
+                )}
+                <Btn
+                  onClick={() =>
+                    setSketches((list) => [...list, cloneSketch(s, step || 0.5)])
+                  }
+                >
+                  Dup
+                </Btn>
+                <Btn
+                  onClick={() => {
+                    setSketches((list) => list.filter((x) => x.id !== s.id));
+                    setSketchSel(null);
+                    setSketchSeg(null);
+                  }}
+                >
+                  Delete
+                </Btn>
+                {(["x", "y", "z"] as const).map((ax, i) => (
+                  <Btn
+                    key={ax}
+                    onClick={() => {
+                      const d: Vec3 = [0, 0, 0];
+                      d[i] = step;
+                      patchSketch(s.id, translateSketch(s, d));
+                    }}
+                  >
+                    {ax}+{step}
+                  </Btn>
+                ))}
+              </div>
+            ) : (
+              <p className="font-mono text-[10px] text-muted-foreground">
+                Tap a line to select it, then curve or edit it.
+              </p>
+            )}
+            {stepRow}
+          </>
+        );
+      }
+
       case "move":
         return (
           <>
@@ -1949,6 +2300,13 @@ export function CadApp() {
                         setObjects(loaded.map((o) => hydrateObject(o)));
                         setSelectedIds([]);
                       }
+                      setSketches(
+                        loadSketches(n).map((s) =>
+                          hydrateSketch(s as Partial<Sketch>),
+                        ),
+                      );
+                      setDraft(null);
+                      setSketchSel(null);
                     }}
                   >
                     Load
@@ -1956,11 +2314,13 @@ export function CadApp() {
                   <Btn
                     onClick={() => {
                       deleteScene(n);
+                      deleteSketches(n);
                       setScenes(listScenes());
                     }}
                   >
                     ✕
                   </Btn>
+
                 </div>
               ))}
             </div>
@@ -2008,10 +2368,20 @@ export function CadApp() {
           measureB={measureB}
           tapPoint={tapPoint}
           cutPreview={cutPreview}
+          sketches={sketches}
+          sketchDraft={draft}
+          sketchSnap={sketchSnap}
+          sketchSelectedId={sketchSel}
+          sketchSelectedSeg={sketchSeg}
+          onSketchTap={onSketchTap}
+          onSketchPickSegment={onSketchPickSegment}
+          onSketchMovePoint={onSketchMovePoint}
+          onSketchMoveHandle={onSketchMoveHandle}
           onSelect={handleSelect}
           onSelectNone={() => setSelectedIds([])}
           onMove={handleMove}
           onMeasurePick={onMeasurePick}
+
           alignMode={alignMode}
           onTapTarget={onTapTarget}
           onCutPick={onCutPick}
