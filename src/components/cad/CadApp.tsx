@@ -705,7 +705,12 @@ export function CadApp() {
             const mdx = (fix.x ?? c.x) - c.x;
             const mdy = (fix.y ?? c.y) - c.y;
             const mdz = (fix.z ?? c.z) - c.z;
-            if (mdx || mdy || mdz) {
+            let allow = true;
+            if (blockOverlap && (mdx || mdy || mdz)) {
+              const test = box.clone().translate(new THREE.Vector3(mdx, mdy, mdz));
+              allow = !others.some((o) => boxesOverlap(test, o.box));
+            }
+            if (allow && (mdx || mdy || mdz)) {
               moved = moved.map((o) =>
                 o.id === target.id
                   ? {
@@ -878,6 +883,14 @@ export function CadApp() {
     updateSelected((o) => ({ ...o, profile: p }));
 
   const setSelectedPos = (axis: 0 | 1 | 2, v: number) => {
+    const id = selectedIds[0];
+    const first = objects.find((o) => o.id === id);
+    if (id && first && selectedIds.length === 1) {
+      const target = [...first.position] as [number, number, number];
+      target[axis] = +v.toFixed(6);
+      handleMove(id, target);
+      return;
+    }
     updateSelected((o) => {
       const position = [...o.position] as [number, number, number];
       position[axis] = +v.toFixed(6);
@@ -962,7 +975,29 @@ export function CadApp() {
 
   const duplicateObjects = (list: PlacedObject[]) => {
     if (!list.length) return;
-    const copies = list.map((o) => cloneObject(o, snap ? grid : 0.25));
+    let copies = list.map((o) => cloneObject(o, snap ? grid : 0.25));
+    // Solid mode: slide each copy clear of whatever it lands inside.
+    if (blockOverlap) {
+      const blockers = objects.map((o) => worldBoxOf(o));
+      copies = copies.map((c) => {
+        let out = c;
+        for (let i = 0; i < 24; i++) {
+          const box = worldBoxOf(out);
+          if (!blockers.some((b) => boxesOverlap(box, b))) break;
+          const w = box.getSize(new THREE.Vector3()).x || 1;
+          out = {
+            ...out,
+            position: [out.position[0] + w, out.position[1], out.position[2]] as [
+              number,
+              number,
+              number,
+            ],
+          };
+        }
+        blockers.push(worldBoxOf(out));
+        return out;
+      });
+    }
     setObjects((prev) => [...prev, ...copies]);
     setSelectedIds(copies.map((c) => c.id));
   };
@@ -1661,6 +1696,16 @@ export function CadApp() {
               <Chip active={magnet} onClick={() => setMagnet((m) => !m)} hint="magnet">
                 Magnet {magnet ? "on" : "off"}
               </Chip>
+              {(["center", "min", "max"] as AlignMode[]).map((m) => (
+                <Chip
+                  key={m}
+                  active={alignMode === m}
+                  onClick={() => setAlignMode(m)}
+                  hint="faceAlign"
+                >
+                  {m === "center" ? "Center face" : m === "min" ? "Flush min" : "Flush max"}
+                </Chip>
+              ))}
               <Chip active={!!tapPoint} onClick={clearTap} hint="tapTarget">
                 {tapPoint ? "Clear tap target" : "No tap target"}
               </Chip>
@@ -1670,7 +1715,9 @@ export function CadApp() {
               Grid snap rounds to the active step ({step}m). Shape snap pulls to
               corners, edge midpoints and face centers of nearby objects. Tap a
               face to set a target — the next shape rests on that surface.
-              Solid mode stops objects passing through each other.
+              Solid mode stops objects passing through each other. Face
+              alignment centers the new shape on the tapped face (or lines it up
+              flush with an edge) so stacks sit square on every side.
               {alignedAxes.length
                 ? ` Selection lines up on ${alignedAxes.join(", ")}.`
                 : ""}
