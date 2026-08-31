@@ -94,6 +94,10 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Solid / Ghost",
     body: "Solid makes objects physically block one another — a moved object stops at the surface it hits and slides along it. Ghost lets shapes pass through and overlap freely.",
   },
+  faceAlign: {
+    title: "Face alignment",
+    body: "How a new shape lines up across the face you tapped. Center puts it dead center on that face, so equal shapes stack flush on all sides. Flush min / max butt it against one edge of the face instead — handy for laying bricks from a corner.",
+  },
   guides: {
     title: "Align guides",
     body: "Draws lines when the selection lines up with another object, and reports which axes match.",
