@@ -17,11 +17,13 @@ import {
   alignmentsFor,
   centerPoint,
   computeCenterPoint,
+  alignOnFace,
   controls,
   flyFocus,
   geometryOf,
   halfExtentAlong,
   meshRegistry,
+  meshWorldBox,
   motionOffset,
   publishCenter,
   roundTo,
@@ -31,6 +33,7 @@ import {
   speedFactor,
   tapTarget,
   worldBoxOf,
+  type AlignMode,
   type DragPlaneMode,
   type Material,
   type PlacedObject,
@@ -300,6 +303,7 @@ function CenterProbe({
   snap,
   grid,
   shapeSnap,
+  alignMode,
   ghostSpec,
   ghostScale,
 }: {
@@ -308,6 +312,7 @@ function CenterProbe({
   snap: boolean;
   grid: number;
   shapeSnap: boolean;
+  alignMode: AlignMode;
   ghostSpec: GeometrySpec;
   ghostScale: [number, number, number];
 }) {
@@ -343,10 +348,19 @@ function CenterProbe({
     sceneRefs.height = viewport.height;
 
     if (tapTarget.point) {
-      // Rest the pending shape on the tapped face instead of merging into it.
-      centerPoint.copy(tapTarget.point);
+      // Rest the pending shape on the tapped face, aligned across it.
       const n = tapTarget.normal;
-      if (n) centerPoint.addScaledVector(n, halfFor(n));
+      const targetMesh = tapTarget.objectId
+        ? meshRegistry.get(tapTarget.objectId)
+        : null;
+      if (n && targetMesh) {
+        centerPoint.copy(
+          alignOnFace(meshWorldBox(targetMesh), n, half, alignMode),
+        );
+      } else {
+        centerPoint.copy(tapTarget.point);
+        if (n) centerPoint.addScaledVector(n, halfFor(n));
+      }
       accum.current += delta;
       if (accum.current >= 1 / 30) {
         accum.current = 0;
@@ -367,6 +381,8 @@ function CenterProbe({
       grid,
       shapeSnap,
       halfFor,
+      half,
+      alignMode,
     });
     centerPoint.copy(point);
 
@@ -465,7 +481,7 @@ function ObjectMesh({
   onSelect: (id: string, additive: boolean) => void;
   onMove: (id: string, pos: [number, number, number]) => void;
   onMeasurePick: (p: THREE.Vector3) => void;
-  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3) => void;
+  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => void;
   onCutPick: (id: string, p: THREE.Vector3, n: THREE.Vector3) => void;
   onLongPress: (id: string, x: number, y: number) => void;
 }) {
@@ -545,7 +561,7 @@ function ObjectMesh({
       const n = e.face
         ? e.face.normal.clone().transformDirection(e.object.matrixWorld).normalize()
         : new THREE.Vector3(0, 1, 0);
-      onTapTarget(e.point.clone(), n);
+      onTapTarget(e.point.clone(), n, o.id);
       return;
     }
     if (tool !== "edit") return;
@@ -750,6 +766,7 @@ export type SceneProps = {
   depth: number;
   snap: boolean;
   shapeSnap: boolean;
+  alignMode: AlignMode;
   grid: number;
   dragStep: number;
   playing: boolean;
@@ -765,7 +782,7 @@ export type SceneProps = {
   onSelectNone: () => void;
   onMove: (id: string, pos: [number, number, number]) => void;
   onMeasurePick: (p: THREE.Vector3) => void;
-  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3) => void;
+  onTapTarget: (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => void;
   onCutPick: (id: string, p: THREE.Vector3, n: THREE.Vector3) => void;
   onLongPress: (id: string, x: number, y: number) => void;
 };
@@ -782,6 +799,7 @@ export function Scene(props: SceneProps) {
     depth,
     snap,
     shapeSnap,
+    alignMode,
     grid,
     dragStep,
     playing,
@@ -862,6 +880,7 @@ export function Scene(props: SceneProps) {
         snap={snap}
         grid={grid}
         shapeSnap={shapeSnap}
+        alignMode={alignMode}
         ghostSpec={ghostSpec}
         ghostScale={ghostScale}
       />
@@ -898,7 +917,7 @@ export function Scene(props: SceneProps) {
             onSelectNone();
           } else if (tool === "place") {
             e.stopPropagation();
-            onTapTarget(e.point.clone(), new THREE.Vector3(0, 1, 0));
+            onTapTarget(e.point.clone(), new THREE.Vector3(0, 1, 0), null);
           }
         }}
       >

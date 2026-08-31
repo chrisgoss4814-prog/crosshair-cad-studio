@@ -36,12 +36,14 @@ import {
   boxesOverlap,
   requestFlyFocus,
   resolveMove,
+  resolveMoveSwept,
   sceneRefs,
   selectionFocusState,
   SNAP,
   STEPS,
   SWATCHES,
   tapTarget,
+  type AlignMode,
   worldBoxOf,
   type CutOp,
   type DragPlaneMode,
@@ -393,7 +395,8 @@ export function CadApp() {
   const [depth, setDepth] = useState(6);
   const [snap, setSnap] = useState(true);
   const [shapeSnap, setShapeSnap] = useState(true);
-  const [blockOverlap, setBlockOverlap] = useState(false);
+  const [blockOverlap, setBlockOverlap] = useState(true);
+  const [alignMode, setAlignMode] = useState<AlignMode>("center");
   const [showGuides, setShowGuides] = useState(true);
   const [dragStep, setDragStep] = useState(0);
   const [material, setMaterial] = useState<Material>(DEFAULT_MATERIAL);
@@ -542,6 +545,7 @@ export function CadApp() {
   const clearTap = () => {
     tapTarget.point = null;
     tapTarget.normal = null;
+    tapTarget.objectId = null;
     setTapPoint(null);
   };
 
@@ -564,6 +568,11 @@ export function CadApp() {
     }
     setArmed(false);
     const p = centerPoint;
+    // Placing on a tapped face copies that object's rotation so faces stay
+    // parallel and the stack reads square.
+    const faceHost = tapTarget.objectId
+      ? objects.find((o) => o.id === tapTarget.objectId)
+      : null;
     const next = makeObject(kind, [p.x, p.y, p.z], size, material, {
       scale: [...stretch] as [number, number, number],
       sides,
@@ -572,6 +581,7 @@ export function CadApp() {
       bend,
       bendAxis,
       taper,
+      ...(faceHost ? { rotation: [...faceHost.rotation] as [number, number, number] } : {}),
     });
     if (wouldCollide(next, [])) {
       toast.error("Blocked — that spot overlaps another object");
@@ -594,7 +604,17 @@ export function CadApp() {
       const key = JSON.stringify(spec);
       return [spec, ...prev.filter((r) => JSON.stringify(r) !== key)].slice(0, 4);
     });
-    clearTap();
+    // Advance the tap target to the new object's outer face so repeated Add
+    // keeps building the same aligned stack.
+    if (tapTarget.point && tapTarget.normal) {
+      const n = tapTarget.normal.clone();
+      tapTarget.point = new THREE.Vector3(p.x, p.y, p.z);
+      tapTarget.normal = n;
+      tapTarget.objectId = next.id;
+      setTapPoint([p.x, p.y, p.z]);
+    } else {
+      clearTap();
+    }
   };
 
   const applyRecent = (r: RecentSpec) => {
@@ -664,7 +684,7 @@ export function CadApp() {
           const blockers = prev
             .filter((o) => !ids.includes(o.id))
             .map((o) => worldBoxOf(o));
-          const ok = resolveMove(
+          const ok = resolveMoveSwept(
             movingBox,
             new THREE.Vector3(dx, dy, dz),
             blockers,
@@ -689,7 +709,7 @@ export function CadApp() {
         );
         // Magnetic alignment: a single dragged object softly snaps into
         // perfect line-up with neighbours.
-        if (magnet && ids.length === 1 && !blockOverlap) {
+        if (magnet && ids.length === 1) {
           const target = moved.find((o) => o.id === ids[0]);
           if (target) {
             const box = worldBoxOf(target);
@@ -701,7 +721,12 @@ export function CadApp() {
             const mdx = (fix.x ?? c.x) - c.x;
             const mdy = (fix.y ?? c.y) - c.y;
             const mdz = (fix.z ?? c.z) - c.z;
-            if (mdx || mdy || mdz) {
+            let allow = true;
+            if (blockOverlap && (mdx || mdy || mdz)) {
+              const test = box.clone().translate(new THREE.Vector3(mdx, mdy, mdz));
+              allow = !others.some((o) => boxesOverlap(test, o.box));
+            }
+            if (allow && (mdx || mdy || mdz)) {
               moved = moved.map((o) =>
                 o.id === target.id
                   ? {
@@ -724,18 +749,23 @@ export function CadApp() {
   );
 
 
-  const onTapTarget = useCallback((p: THREE.Vector3, n: THREE.Vector3) => {
-    if (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001) {
-      tapTarget.point = null;
-      tapTarget.normal = null;
-      setTapPoint(null);
-      return;
-    }
-    const point = p.clone();
-    tapTarget.point = point;
-    tapTarget.normal = n.clone();
-    setTapPoint([point.x, point.y, point.z]);
-  }, []);
+  const onTapTarget = useCallback(
+    (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => {
+      if (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001) {
+        tapTarget.point = null;
+        tapTarget.normal = null;
+        tapTarget.objectId = null;
+        setTapPoint(null);
+        return;
+      }
+      const point = p.clone();
+      tapTarget.point = point;
+      tapTarget.normal = n.clone();
+      tapTarget.objectId = id;
+      setTapPoint([point.x, point.y, point.z]);
+    },
+    [],
+  );
 
   // --- cut ------------------------------------------------------------------
 
@@ -869,6 +899,14 @@ export function CadApp() {
     updateSelected((o) => ({ ...o, profile: p }));
 
   const setSelectedPos = (axis: 0 | 1 | 2, v: number) => {
+    const id = selectedIds[0];
+    const first = objects.find((o) => o.id === id);
+    if (id && first && selectedIds.length === 1) {
+      const target = [...first.position] as [number, number, number];
+      target[axis] = +v.toFixed(6);
+      handleMove(id, target);
+      return;
+    }
     updateSelected((o) => {
       const position = [...o.position] as [number, number, number];
       position[axis] = +v.toFixed(6);
@@ -953,7 +991,29 @@ export function CadApp() {
 
   const duplicateObjects = (list: PlacedObject[]) => {
     if (!list.length) return;
-    const copies = list.map((o) => cloneObject(o, snap ? grid : 0.25));
+    let copies = list.map((o) => cloneObject(o, snap ? grid : 0.25));
+    // Solid mode: slide each copy clear of whatever it lands inside.
+    if (blockOverlap) {
+      const blockers = objects.map((o) => worldBoxOf(o));
+      copies = copies.map((c) => {
+        let out = c;
+        for (let i = 0; i < 24; i++) {
+          const box = worldBoxOf(out);
+          if (!blockers.some((b) => boxesOverlap(box, b))) break;
+          const w = box.getSize(new THREE.Vector3()).x || 1;
+          out = {
+            ...out,
+            position: [out.position[0] + w, out.position[1], out.position[2]] as [
+              number,
+              number,
+              number,
+            ],
+          };
+        }
+        blockers.push(worldBoxOf(out));
+        return out;
+      });
+    }
     setObjects((prev) => [...prev, ...copies]);
     setSelectedIds(copies.map((c) => c.id));
   };
@@ -1652,6 +1712,16 @@ export function CadApp() {
               <Chip active={magnet} onClick={() => setMagnet((m) => !m)} hint="magnet">
                 Magnet {magnet ? "on" : "off"}
               </Chip>
+              {(["center", "min", "max"] as AlignMode[]).map((m) => (
+                <Chip
+                  key={m}
+                  active={alignMode === m}
+                  onClick={() => setAlignMode(m)}
+                  hint="faceAlign"
+                >
+                  {m === "center" ? "Center face" : m === "min" ? "Flush min" : "Flush max"}
+                </Chip>
+              ))}
               <Chip active={!!tapPoint} onClick={clearTap} hint="tapTarget">
                 {tapPoint ? "Clear tap target" : "No tap target"}
               </Chip>
@@ -1661,7 +1731,9 @@ export function CadApp() {
               Grid snap rounds to the active step ({step}m). Shape snap pulls to
               corners, edge midpoints and face centers of nearby objects. Tap a
               face to set a target — the next shape rests on that surface.
-              Solid mode stops objects passing through each other.
+              Solid mode stops objects passing through each other. Face
+              alignment centers the new shape on the tapped face (or lines it up
+              flush with an edge) so stacks sit square on every side.
               {alignedAxes.length
                 ? ` Selection lines up on ${alignedAxes.join(", ")}.`
                 : ""}
@@ -1940,6 +2012,7 @@ export function CadApp() {
           onSelectNone={() => setSelectedIds([])}
           onMove={handleMove}
           onMeasurePick={onMeasurePick}
+          alignMode={alignMode}
           onTapTarget={onTapTarget}
           onCutPick={onCutPick}
           onLongPress={onLongPress}
