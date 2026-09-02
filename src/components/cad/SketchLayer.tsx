@@ -53,6 +53,32 @@ function SketchCursor({
 }
 
 
+/** Always-visible marker that rides the screen centre while drawing. */
+function CursorDot() {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    ref.current?.position.copy(sketchCursor.point);
+  });
+  return (
+    <group ref={ref}>
+      <mesh>
+        <sphereGeometry args={[0.06, 12, 12]} />
+        <meshBasicMaterial color={POINT_COLOR} depthTest={false} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.12, 0.15, 24]} />
+        <meshBasicMaterial
+          color={POINT_COLOR}
+          transparent
+          opacity={0.8}
+          side={THREE.DoubleSide}
+          depthTest={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
 /** Rubber band from the last placed point to the live cursor. */
 function DraftPreview({ draft }: { draft: Sketch }) {
   const ref = useRef<THREE.Object3D & { geometry: { setPositions: (a: number[]) => void } }>(
