@@ -12,7 +12,7 @@ import {
   OrthographicCamera,
 } from "@react-three/drei";
 import * as THREE from "three";
-import { buildGeometry, type GeometrySpec } from "./geometry";
+import { buildGeometry, is2D, type GeometrySpec } from "./geometry";
 import { SketchLayer } from "./SketchLayer";
 import type { Sketch, SketchSnapPrefs, Vec3 } from "./sketch";
 
@@ -416,19 +416,45 @@ function Ghost({
 }) {
   const ref = useRef<THREE.Group>(null);
   const geo = useMemo(() => buildGeometry(spec), [spec]);
+  // Flat 2D outlines read as nothing in wireframe when seen edge-on, so they
+  // get a translucent double-sided face plus a bright outline instead.
+  const flat = is2D(spec.kind) && !(spec.extrude > 0);
   useFrame(() => {
     ref.current?.position.copy(centerPoint);
   });
+  const ghostMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: material.color,
+        wireframe: !flat,
+        transparent: true,
+        opacity: flat ? 0.3 : 0.7,
+        side: flat ? THREE.DoubleSide : THREE.FrontSide,
+        depthWrite: false,
+      }),
+    [material.color, flat],
+  );
+  const pipMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({ color: material.color, depthTest: false }),
+    [material.color],
+  );
+  useEffect(
+    () => () => {
+      ghostMat.dispose();
+      pipMat.dispose();
+    },
+    [ghostMat, pipMat],
+  );
+  const pipGeo = useMemo(() => new THREE.SphereGeometry(0.035, 10, 10), []);
+
   return (
     <group ref={ref}>
-      <mesh geometry={geo} scale={scale}>
-        <meshBasicMaterial
-          color={material.color}
-          wireframe
-          transparent
-          opacity={0.7}
-        />
+      <mesh geometry={geo} scale={scale} material={ghostMat}>
+        {flat && <Edges color={material.color} />}
       </mesh>
+      {/* Centre pip so the pending shape is always locatable. */}
+      <mesh geometry={pipGeo} material={pipMat} />
     </group>
   );
 }
