@@ -2363,7 +2363,12 @@ export function CadApp() {
 
   return (
     <HintCtx.Provider value={setHelpId}>
-    <main className="fixed inset-0 overflow-hidden bg-background text-foreground">
+    <main
+      className="fixed inset-0 overflow-hidden bg-background text-foreground"
+      onTouchStart={(e) => {
+        if (clearHud && e.touches.length >= 3) setClearHud(false);
+      }}
+    >
       <h1 className="sr-only">Vector Bay — 3D CAD sketchpad</h1>
 
       <Canvas
@@ -2415,6 +2420,18 @@ export function CadApp() {
       </Canvas>
 
       <AxisHud step={step} />
+
+      {/* Clear-screen mode: only Add + a way back, over the bare world */}
+      {clearHud && (
+        <div className="absolute bottom-3 right-3 z-40 flex gap-1.5">
+          <Btn onClick={place} hint="add">
+            Add
+          </Btn>
+          <Btn onClick={() => setClearHud(false)} hint="clearHud">
+            Show
+          </Btn>
+        </div>
+      )}
 
       {/* Box-select capture layer */}
       {tool === "edit" && boxSelect && (
