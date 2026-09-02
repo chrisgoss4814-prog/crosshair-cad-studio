@@ -18,6 +18,11 @@ middle of the screen that goes exactly where it sits when you press Add.
   center is tapping the face of an existing object. Then it hops onto that
   face, aligned and flush (current face-align behaviour kept). Tapping the same
   face again, or tapping empty space, releases it back to the screen center.
+- **Face-snapped blocks ignore passers-by.** When the block is snapped to a
+  tapped face, overlapping any *other* object is allowed — Solid-mode blocking
+  does not stop or shove it. It only rests on the tapped face itself, so you
+  can still place against a wall or floor even where another object sits in
+  the way. Blocking resumes normally once the object is placed and moved.
 - **Depth control stays.** The distance of the block from you is still set by
   the depth/elevation controls, so you can push it further out or pull it in.
 - **Grid snap becomes a choice, not a hijack.** With Snap on, the center block's
