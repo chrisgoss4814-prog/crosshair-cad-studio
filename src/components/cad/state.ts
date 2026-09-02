@@ -226,7 +226,7 @@ export function getCenterSnapshot() {
 // ---------------------------------------------------------------------------
 
 export const SNAP = 0.5;
-const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
 
 export function roundTo(value: number, grid: number) {
   return Math.round(value / grid) * grid;
@@ -241,7 +241,6 @@ export function snapVec(v: THREE.Vector3, snap: boolean, grid = SNAP) {
   ];
 }
 
-const _normal = new THREE.Vector3();
 const _point = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
@@ -347,10 +346,35 @@ export function alignOnFace(
 }
 
 /**
- * Resolve the world point under the screen center.
- *
- * Priority when snapping is on: object face (aligned + flush) -> ground plane
- * -> free depth.
+ * Quantize a point to a Minecraft-style block lattice: the cell on each axis
+ * is the ghost's own full extent (2 * half), offset by half a block so blocks
+ * placed anywhere butt face-to-face with no overhang. Axes with no
+ * meaningful extent fall back to the fixed grid.
+ */
+export function snapToLattice(
+  p: THREE.Vector3,
+  half: THREE.Vector3 | undefined,
+  grid: number,
+): THREE.Vector3 {
+  const out = p.clone();
+  const keys = ["x", "y", "z"] as const;
+  for (const k of keys) {
+    const h = half?.[k] ?? 0;
+    if (h > 1e-6) {
+      // Cell = 2h, lattice anchored so cell faces sit at multiples of 2h.
+      out[k] = (Math.round(p[k] / (2 * h) - 0.5) + 0.5) * 2 * h;
+    } else {
+      out[k] = roundTo(p[k], grid);
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolve the world point at the screen center: always the camera-forward
+ * point at `depth`, quantized to the ghost's own block lattice when snap is
+ * on. Surfaces and ground no longer pull the point away — face placement is
+ * opt-in via the tap target.
  */
 export function computeCenterPoint(
   camera: THREE.Camera,
@@ -369,68 +393,11 @@ export function computeCenterPoint(
   },
 ): { point: THREE.Vector3; onSurface: boolean; snapped: boolean } {
   const grid = opts.grid ?? SNAP;
-  const halfFor = opts.halfFor ?? (() => opts.size / 2);
-  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-
-  const meshes = Array.from(meshRegistry.values());
-  if (opts.snap && meshes.length) {
-    const hits = raycaster.intersectObjects(meshes, false);
-    const hit = hits[0];
-    if (hit && hit.face) {
-      _normal
-        .copy(hit.face.normal)
-        .transformDirection(hit.object.matrixWorld)
-        .normalize();
-      const off = halfFor(_normal);
-
-      // Face alignment: sit flush on the face and centre across it.
-      if (opts.half && opts.shapeSnap !== false) {
-        const box = meshWorldBox(hit.object);
-        return {
-          point: alignOnFace(box, _normal, opts.half, opts.alignMode ?? "center"),
-          onSurface: true,
-          snapped: true,
-        };
-      }
-
-      _point.copy(hit.point).addScaledVector(_normal, off);
-
-      // Round only across the face; never along the normal, so contact stays flush.
-      const ax = Math.abs(_normal.x);
-      const ay = Math.abs(_normal.y);
-      const az = Math.abs(_normal.z);
-      if (ax < 0.8) _point.x = roundTo(_point.x, grid);
-      if (ay < 0.8) _point.y = roundTo(_point.y, grid);
-      if (az < 0.8) _point.z = roundTo(_point.z, grid);
-
-      return { point: _point.clone(), onSurface: true, snapped: false };
-    }
-
-  }
-
-  if (opts.snap && raycaster.ray.intersectPlane(GROUND, _point)) {
-    const dist = raycaster.ray.origin.distanceTo(_point);
-    if (dist <= 200) {
-      return {
-        point: new THREE.Vector3(
-          roundTo(_point.x, grid),
-          halfFor(new THREE.Vector3(0, 1, 0)),
-          roundTo(_point.z, grid),
-        ),
-        onSurface: false,
-        snapped: false,
-      };
-    }
-  }
-
   camera.getWorldDirection(_dir);
   _point.copy(camera.position).addScaledVector(_dir, opts.depth);
   if (opts.snap) {
-    _point.set(
-      roundTo(_point.x, grid),
-      roundTo(_point.y, grid),
-      roundTo(_point.z, grid),
-    );
+    const snapped = snapToLattice(_point, opts.half, grid);
+    return { point: snapped, onSurface: false, snapped: true };
   }
   return { point: _point.clone(), onSurface: false, snapped: false };
 }

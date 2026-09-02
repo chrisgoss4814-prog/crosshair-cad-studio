@@ -435,6 +435,20 @@ export function CadApp() {
   const [dragStep, setDragStep] = useState(0);
   const [material, setMaterial] = useState<Material>(DEFAULT_MATERIAL);
   const [dragPlane, setDragPlane] = useState<DragPlaneMode>("horizontal");
+  const [clearHud, setClearHud] = useState(() => {
+    try {
+      return localStorage.getItem("vectorbay:clearHud") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("vectorbay:clearHud", clearHud ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [clearHud]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [multi, setMulti] = useState(false);
   const [boxSelect, setBoxSelect] = useState(false);
@@ -785,7 +799,9 @@ export function CadApp() {
       taper,
       ...(faceHost ? { rotation: [...faceHost.rotation] as [number, number, number] } : {}),
     });
-    if (wouldCollide(next, [])) {
+    // Face-snapped placements rest on the tapped face and are allowed to pass
+    // through other objects in the way; blocking resumes once placed.
+    if (!faceHost && wouldCollide(next, [])) {
       toast.error("Blocked — that spot overlaps another object");
       return;
     }
@@ -953,7 +969,12 @@ export function CadApp() {
 
   const onTapTarget = useCallback(
     (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => {
-      if (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001) {
+      // Tapping empty ground, or re-tapping the active target, releases the
+      // ghost back to the screen-center lattice.
+      if (
+        id === null ||
+        (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001)
+      ) {
         tapTarget.point = null;
         tapTarget.normal = null;
         tapTarget.objectId = null;
@@ -2342,7 +2363,12 @@ export function CadApp() {
 
   return (
     <HintCtx.Provider value={setHelpId}>
-    <main className="fixed inset-0 overflow-hidden bg-background text-foreground">
+    <main
+      className="fixed inset-0 overflow-hidden bg-background text-foreground"
+      onTouchStart={(e) => {
+        if (clearHud && e.touches.length >= 3) setClearHud(false);
+      }}
+    >
       <h1 className="sr-only">Vector Bay — 3D CAD sketchpad</h1>
 
       <Canvas
@@ -2395,6 +2421,18 @@ export function CadApp() {
 
       <AxisHud step={step} />
 
+      {/* Clear-screen mode: only Add + a way back, over the bare world */}
+      {clearHud && (
+        <div className="absolute bottom-3 right-3 z-40 flex gap-1.5">
+          <Btn onClick={place} hint="add">
+            Add
+          </Btn>
+          <Btn onClick={() => setClearHud(false)} hint="clearHud">
+            Show
+          </Btn>
+        </div>
+      )}
+
       {/* Box-select capture layer */}
       {tool === "edit" && boxSelect && (
         <div
@@ -2425,8 +2463,8 @@ export function CadApp() {
         </div>
       )}
 
-      {/* Top bar — hidden while a toolbar strip is open */}
-      {!focused && (
+      {/* Top bar — hidden while a toolbar strip is open or the screen is clear */}
+      {!focused && !clearHud && (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3">
           <div className="pointer-events-auto flex gap-1.5">
             {VIEWS.map((v) => (
@@ -2454,19 +2492,28 @@ export function CadApp() {
             <Btn onClick={undo} disabled={!objects.length} hint="undo">
               Undo
             </Btn>
+            <Chip
+              active={false}
+              onClick={() => setClearHud(true)}
+              hint="clearHud"
+            >
+              Clear
+            </Chip>
           </div>
         </div>
       )}
 
       {/* Alignment readout */}
-      {alignedAxes.length > 0 && (
+      {alignedAxes.length > 0 && !clearHud && (
         <div className="pointer-events-none absolute left-1/2 top-3 z-40 -translate-x-1/2 rounded-md border border-axis-y/60 bg-panel/85 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-axis-y backdrop-blur-md">
           aligned on {alignedAxes.join(" · ")}
         </div>
       )}
 
-      {/* Bottom: focused strip or the category bar */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col gap-2 p-2">
+      {/* Bottom: focused strip or the category bar — hidden in clear mode */}
+      <div
+        className={`pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col gap-2 p-2${clearHud ? " hidden" : ""}`}
+      >
         {focused && !collapsed && (
           <div className="pointer-events-auto mx-auto w-full max-w-[520px] rounded-lg border border-grid-line bg-panel/95 px-2.5 py-2 shadow-hud backdrop-blur-md">
             <div className="mb-1.5 flex items-center justify-between">
@@ -2725,7 +2772,7 @@ export function CadApp() {
       )}
 
       {/* Selection readout */}
-      {selectedIds.length > 0 && !focused && (
+      {selectedIds.length > 0 && !focused && !clearHud && (
         <div className="pointer-events-none absolute right-3 top-14 z-40 rounded-md border border-grid-line bg-panel/85 px-2 py-1 font-mono text-[10px] text-muted-foreground backdrop-blur-md">
           {selectedIds.length} selected · c {selectionCenter.x.toFixed(2)}/
           {selectionCenter.y.toFixed(2)}/{selectionCenter.z.toFixed(2)}
