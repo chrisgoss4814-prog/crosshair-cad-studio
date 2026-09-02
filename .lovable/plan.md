@@ -36,6 +36,25 @@ lines up like Minecraft — just with the full shape library.
 - **Depth control stays.** The distance of the ghost from you is still set by
   the depth/elevation controls; it just quantizes to the same lattice.
 
+## What this plan does NOT touch
+
+To be clear about unintended consequences: the joysticks, swipe/pinch flying,
+view modes, tap-to-select, drag/nudge/typed-coordinate editing, Solid/Ghost
+blocking for objects you have already placed, alignment guides, the Cut tool,
+the Line tool, scene save/load, and the AI builder all stay exactly as they are.
+The only behaviour removed is the ghost spontaneously jumping to whatever
+surface or ground the center of the screen points at — you keep that same
+snap by tapping a face instead.
+
+## Clear screen mode
+
+- A new **Clear** toggle button hides every HUD element — toolbars, chips,
+  sliders, coordinate readouts and buttons — leaving only the 3D world, the
+  axis lines and the center ghost block.
+- One small floating button (and a three-finger tap gesture) brings the HUD
+  back. Flying, tapping faces and Add still work while the screen is clear.
+- The toggle is remembered between sessions.
+
 ## Technical notes
 
 - `computeCenterPoint` (`src/components/cad/state.ts`): remove the surface-hit
