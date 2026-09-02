@@ -83,8 +83,12 @@ export const HELP: Record<string, HelpEntry> = {
 
   // Snapping and collision
   gridSnap: {
-    title: "Grid snap",
-    body: "Rounds the placement point to the active step, so everything lands on a clean grid.",
+    title: "Snap",
+    body: "With Snap on, the ghost block at the screen center hops in whole-block steps the size of the shape itself, so everything you place lines up edge-to-edge like Minecraft. With Snap off it glides freely.",
+  },
+  clearHud: {
+    title: "Clear screen",
+    body: "Hides every button and panel so you see only the world, the axis lines and the ghost block. Add still works, and a small Show button or a three-finger tap brings the controls back.",
   },
   shapeSnap: {
     title: "Shape snap",
@@ -225,6 +229,7 @@ export const HELP_ORDER: string[] = [
   "taper",
   "step",
   "gridSnap",
+  "clearHud",
   "shapeSnap",
   "solid",
   "guides",
