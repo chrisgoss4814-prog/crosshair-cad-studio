@@ -2772,7 +2772,7 @@ export function CadApp() {
       )}
 
       {/* Selection readout */}
-      {selectedIds.length > 0 && !focused && (
+      {selectedIds.length > 0 && !focused && !clearHud && (
         <div className="pointer-events-none absolute right-3 top-14 z-40 rounded-md border border-grid-line bg-panel/85 px-2 py-1 font-mono text-[10px] text-muted-foreground backdrop-blur-md">
           {selectedIds.length} selected · c {selectionCenter.x.toFixed(2)}/
           {selectionCenter.y.toFixed(2)}/{selectionCenter.z.toFixed(2)}
