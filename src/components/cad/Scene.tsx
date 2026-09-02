@@ -422,32 +422,39 @@ function Ghost({
   useFrame(() => {
     ref.current?.position.copy(centerPoint);
   });
+  const ghostMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: material.color,
+        wireframe: !flat,
+        transparent: true,
+        opacity: flat ? 0.3 : 0.7,
+        side: flat ? THREE.DoubleSide : THREE.FrontSide,
+        depthWrite: false,
+      }),
+    [material.color, flat],
+  );
+  const pipMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({ color: material.color, depthTest: false }),
+    [material.color],
+  );
+  useEffect(
+    () => () => {
+      ghostMat.dispose();
+      pipMat.dispose();
+    },
+    [ghostMat, pipMat],
+  );
+  const pipGeo = useMemo(() => new THREE.SphereGeometry(0.035, 10, 10), []);
+
   return (
     <group ref={ref}>
-      <mesh geometry={geo} scale={scale}>
-        {flat ? (
-          <meshBasicMaterial
-            color={material.color}
-            transparent
-            opacity={0.28}
-            side={THREE.DoubleSide}
-            depthWrite={false}
-          />
-        ) : (
-          <meshBasicMaterial
-            color={material.color}
-            wireframe
-            transparent
-            opacity={0.7}
-          />
-        )}
+      <mesh geometry={geo} scale={scale} material={ghostMat}>
         {flat && <Edges color={material.color} />}
       </mesh>
       {/* Centre pip so the pending shape is always locatable. */}
-      <mesh>
-        <sphereGeometry args={[0.035, 10, 10]} />
-        <meshBasicMaterial color={material.color} depthTest={false} />
-      </mesh>
+      <mesh geometry={pipGeo} material={pipMat} />
     </group>
   );
 }
