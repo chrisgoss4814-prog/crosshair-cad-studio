@@ -2493,8 +2493,10 @@ export function CadApp() {
         </div>
       )}
 
-      {/* Bottom: focused strip or the category bar */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col gap-2 p-2">
+      {/* Bottom: focused strip or the category bar — hidden in clear mode */}
+      <div
+        className={`pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col gap-2 p-2${clearHud ? " hidden" : ""}`}
+      >
         {focused && !collapsed && (
           <div className="pointer-events-auto mx-auto w-full max-w-[520px] rounded-lg border border-grid-line bg-panel/95 px-2.5 py-2 shadow-hud backdrop-blur-md">
             <div className="mb-1.5 flex items-center justify-between">
