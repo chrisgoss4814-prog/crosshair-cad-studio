@@ -282,13 +282,16 @@ export function SketchLayer({
   return (
     <group>
       {drawing && (
-        <SketchCursor
-          sketches={sketches}
-          draft={draft}
-          prefs={prefs}
-          grid={grid}
-          tol={tol}
-        />
+        <>
+          <SketchCursor
+            sketches={sketches}
+            draft={draft}
+            prefs={prefs}
+            grid={grid}
+            tol={tol}
+          />
+          <CursorDot />
+        </>
       )}
       {sketches.map((s) => (
         <SketchView
