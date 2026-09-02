@@ -226,7 +226,7 @@ export function getCenterSnapshot() {
 // ---------------------------------------------------------------------------
 
 export const SNAP = 0.5;
-const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
 
 export function roundTo(value: number, grid: number) {
   return Math.round(value / grid) * grid;
@@ -241,7 +241,6 @@ export function snapVec(v: THREE.Vector3, snap: boolean, grid = SNAP) {
   ];
 }
 
-const _normal = new THREE.Vector3();
 const _point = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
