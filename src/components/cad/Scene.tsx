@@ -12,7 +12,7 @@ import {
   OrthographicCamera,
 } from "@react-three/drei";
 import * as THREE from "three";
-import { buildGeometry, type GeometrySpec } from "./geometry";
+import { buildGeometry, is2D, type GeometrySpec } from "./geometry";
 import { SketchLayer } from "./SketchLayer";
 import type { Sketch, SketchSnapPrefs, Vec3 } from "./sketch";
 
