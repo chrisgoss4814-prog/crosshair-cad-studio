@@ -416,18 +416,37 @@ function Ghost({
 }) {
   const ref = useRef<THREE.Group>(null);
   const geo = useMemo(() => buildGeometry(spec), [spec]);
+  // Flat 2D outlines read as nothing in wireframe when seen edge-on, so they
+  // get a translucent double-sided face plus a bright outline instead.
+  const flat = is2D(spec.kind) && !(spec.extrude > 0);
   useFrame(() => {
     ref.current?.position.copy(centerPoint);
   });
   return (
     <group ref={ref}>
       <mesh geometry={geo} scale={scale}>
-        <meshBasicMaterial
-          color={material.color}
-          wireframe
-          transparent
-          opacity={0.7}
-        />
+        {flat ? (
+          <meshBasicMaterial
+            color={material.color}
+            transparent
+            opacity={0.28}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        ) : (
+          <meshBasicMaterial
+            color={material.color}
+            wireframe
+            transparent
+            opacity={0.7}
+          />
+        )}
+        {flat && <Edges color={material.color} />}
+      </mesh>
+      {/* Centre pip so the pending shape is always locatable. */}
+      <mesh>
+        <sphereGeometry args={[0.035, 10, 10]} />
+        <meshBasicMaterial color={material.color} depthTest={false} />
       </mesh>
     </group>
   );
