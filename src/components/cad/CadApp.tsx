@@ -435,6 +435,20 @@ export function CadApp() {
   const [dragStep, setDragStep] = useState(0);
   const [material, setMaterial] = useState<Material>(DEFAULT_MATERIAL);
   const [dragPlane, setDragPlane] = useState<DragPlaneMode>("horizontal");
+  const [clearHud, setClearHud] = useState(() => {
+    try {
+      return localStorage.getItem("vectorbay:clearHud") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("vectorbay:clearHud", clearHud ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [clearHud]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [multi, setMulti] = useState(false);
   const [boxSelect, setBoxSelect] = useState(false);
