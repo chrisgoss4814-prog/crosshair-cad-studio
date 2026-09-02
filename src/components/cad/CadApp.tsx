@@ -785,7 +785,9 @@ export function CadApp() {
       taper,
       ...(faceHost ? { rotation: [...faceHost.rotation] as [number, number, number] } : {}),
     });
-    if (wouldCollide(next, [])) {
+    // Face-snapped placements rest on the tapped face and are allowed to pass
+    // through other objects in the way; blocking resumes once placed.
+    if (!faceHost && wouldCollide(next, [])) {
       toast.error("Blocked — that spot overlaps another object");
       return;
     }
@@ -953,7 +955,12 @@ export function CadApp() {
 
   const onTapTarget = useCallback(
     (p: THREE.Vector3, n: THREE.Vector3, id: string | null) => {
-      if (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001) {
+      // Tapping empty ground, or re-tapping the active target, releases the
+      // ghost back to the screen-center lattice.
+      if (
+        id === null ||
+        (tapTarget.point && tapTarget.point.distanceTo(p) < 0.001)
+      ) {
         tapTarget.point = null;
         tapTarget.normal = null;
         tapTarget.objectId = null;
