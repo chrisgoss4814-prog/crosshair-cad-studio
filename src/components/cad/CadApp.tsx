@@ -2446,8 +2446,8 @@ export function CadApp() {
         </div>
       )}
 
-      {/* Top bar — hidden while a toolbar strip is open */}
-      {!focused && (
+      {/* Top bar — hidden while a toolbar strip is open or the screen is clear */}
+      {!focused && !clearHud && (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3">
           <div className="pointer-events-auto flex gap-1.5">
             {VIEWS.map((v) => (
@@ -2475,12 +2475,19 @@ export function CadApp() {
             <Btn onClick={undo} disabled={!objects.length} hint="undo">
               Undo
             </Btn>
+            <Chip
+              active={false}
+              onClick={() => setClearHud(true)}
+              hint="clearHud"
+            >
+              Clear
+            </Chip>
           </div>
         </div>
       )}
 
       {/* Alignment readout */}
-      {alignedAxes.length > 0 && (
+      {alignedAxes.length > 0 && !clearHud && (
         <div className="pointer-events-none absolute left-1/2 top-3 z-40 -translate-x-1/2 rounded-md border border-axis-y/60 bg-panel/85 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-axis-y backdrop-blur-md">
           aligned on {alignedAxes.join(" · ")}
         </div>
