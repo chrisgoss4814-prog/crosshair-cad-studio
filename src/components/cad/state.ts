@@ -165,6 +165,16 @@ export function speedFactor() {
 /** Live world-space position of the screen-center placement point. */
 export const centerPoint = new THREE.Vector3();
 
+/**
+ * Where the next object actually lands. Equals `centerPoint` normally; when a
+ * face has been tapped it holds the flush-on-face position instead, so the
+ * ghost can stay locked to the middle of the screen.
+ */
+export const placePoint = new THREE.Vector3();
+
+/** Camera heading (radians) so the ghost can always face the viewer. */
+export const ghostYaw = { value: 0 };
+
 /** Sticky tap target — when set, placement uses this instead of screen center. */
 export const tapTarget: {
   point: THREE.Vector3 | null;
