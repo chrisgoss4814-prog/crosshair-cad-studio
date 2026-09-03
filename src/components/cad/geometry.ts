@@ -351,6 +351,7 @@ export function buildGeometry(spec: GeometrySpec): THREE.BufferGeometry {
   if (mods.some((m) => m.curve || m.angle)) {
     geo = applyEdgeMods(geo.clone(), edgesOf(spec), mods);
   }
+  if (spec.taper) geo = applyTaper(geo.clone(), spec.taper);
   geo.computeBoundingBox();
 
   if (cache.size > 240) cache.clear();
