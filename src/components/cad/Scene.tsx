@@ -19,6 +19,8 @@ import type { Sketch, SketchSnapPrefs, Vec3 } from "./sketch";
 import {
   alignmentsFor,
   centerPoint,
+  placePoint,
+  ghostYaw,
   computeCenterPoint,
   alignOnFace,
   controls,
