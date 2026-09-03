@@ -76,6 +76,8 @@ export type PlacedObject = {
   extrude: number;
   /** Per-edge length/curve/angle tweaks. */
   edges: EdgeMod[];
+  /** Slice taper along the vertical axis: + widens the top, - widens the base. */
+  taper: number;
   profile: Shape2D | null;
   ops: CutOp[];
   motion: MotionSpec | null;
@@ -437,6 +439,7 @@ export function makeObject(
     sides: 6,
     extrude: is2D(kind) ? 0 : 0,
     edges: [],
+    taper: 0,
     profile: null,
     ops: [],
     motion: null,
@@ -461,6 +464,7 @@ export function hydrateObject(o: Partial<PlacedObject> & { id: string }): Placed
     sides: 6,
     extrude: 0,
     edges: [],
+    taper: 0,
     profile: null,
     ops: [],
     motion: null,
@@ -479,6 +483,7 @@ export function specOf(o: PlacedObject): GeometrySpec {
     sides: o.sides ?? 6,
     extrude: o.extrude ?? 0,
     edges: o.edges ?? [],
+    taper: o.taper ?? 0,
     profile: o.profile ?? null,
   };
 }
