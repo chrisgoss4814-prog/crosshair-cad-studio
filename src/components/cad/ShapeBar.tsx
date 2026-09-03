@@ -132,29 +132,36 @@ function Glyph({ kind }: { kind: ShapeKind }) {
   })();
 
   return (
-    <svg viewBox="0 0 24 24" className="h-7 w-7" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
       {body}
     </svg>
   );
 }
 
-function Row({
+/** Vertical icon rail pinned to one screen edge. */
+function Rail({
   title,
   list,
   active,
   onPick,
+  side,
 }: {
   title: string;
   list: readonly ShapeKind[];
   active: ShapeKind;
   onPick: (k: ShapeKind) => void;
+  side: "left" | "right";
 }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="w-6 shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+    <div
+      className={`pointer-events-auto absolute top-1/2 z-40 flex max-h-[52vh] w-11 -translate-y-1/2 flex-col items-center gap-1 rounded-lg border border-grid-line bg-panel/70 py-1 backdrop-blur-md ${
+        side === "left" ? "left-1" : "right-1"
+      }`}
+    >
+      <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
         {title}
       </span>
-      <div className="flex flex-1 gap-1 overflow-x-auto pb-0.5">
+      <div className="flex flex-col gap-1 overflow-y-auto overscroll-contain px-1 pb-0.5">
         {list.map((k) => (
           <button
             key={k}
@@ -162,10 +169,10 @@ function Row({
             title={k}
             aria-label={k}
             onClick={() => onPick(k)}
-            className={`flex shrink-0 flex-col items-center rounded-md border px-1.5 py-1 transition-colors ${
+            className={`flex shrink-0 flex-col items-center rounded-md border p-1 transition-colors ${
               active === k
                 ? "border-accent bg-accent/20 text-accent shadow-glow"
-                : "border-grid-line bg-panel/80 text-muted-foreground hover:text-foreground"
+                : "border-grid-line bg-panel/60 text-muted-foreground hover:text-foreground"
             }`}
           >
             <Glyph kind={k} />
@@ -176,7 +183,7 @@ function Row({
   );
 }
 
-/** Shape picker pinned to the top of the screen, split into 3D and 2D rows. */
+/** Shape picker: 3D icons on the left edge, 2D icons on the right edge. */
 export function ShapeBar({
   kind,
   onPick,
@@ -185,9 +192,9 @@ export function ShapeBar({
   onPick: (k: ShapeKind) => void;
 }) {
   return (
-    <div className="pointer-events-auto absolute inset-x-0 top-0 z-40 flex flex-col gap-1 border-b border-grid-line bg-panel/90 px-2 py-1.5 backdrop-blur-md">
-      <Row title="3d" list={SHAPES_3D} active={kind} onPick={onPick} />
-      <Row title="2d" list={SHAPES_2D} active={kind} onPick={onPick} />
-    </div>
+    <>
+      <Rail title="3d" list={SHAPES_3D} active={kind} onPick={onPick} side="left" />
+      <Rail title="2d" list={SHAPES_2D} active={kind} onPick={onPick} side="right" />
+    </>
   );
 }
