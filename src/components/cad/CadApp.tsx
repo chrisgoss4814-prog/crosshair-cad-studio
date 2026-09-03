@@ -12,13 +12,15 @@ import {
 import { Canvas } from "@react-three/fiber";
 import * as THREE from "three";
 import { Joystick } from "./Joystick";
-import { AxisHud } from "./AxisHud";
+import { ShapeBar } from "./ShapeBar";
 import { HELP, HELP_ORDER } from "./help";
 import { Scene, type CutPreview } from "./Scene";
 import {
+  edgesOf,
   is2D,
   SHAPES_2D,
   SHAPES_3D,
+  type EdgeMod,
   type GeometrySpec,
   type Shape2D,
   type ShapeKind,
@@ -740,6 +742,14 @@ export function CadApp() {
     () => ({ kind, sides, extrude, edges: edgeMods, profile: null }),
     [kind, sides, extrude, edgeMods],
   );
+
+  const ghostEdges = useMemo(() => edgesOf(ghostSpec), [ghostSpec]);
+
+  // Edge picks belong to a shape; drop them when the shape changes.
+  useEffect(() => {
+    setSelEdges([]);
+    setEdgeMods([]);
+  }, [kind, sides, extrude]);
 
   const selectedObjects = useMemo(
     () => objects.filter((o) => selectedIds.includes(o.id)),
@@ -1753,7 +1763,7 @@ export function CadApp() {
               for (const i of selEdges) {
                 const e = edges[i];
                 if (!e) continue;
-                edges.forEach((o, j) => {
+                edges.forEach((o: (typeof edges)[number], j: number) => {
                   if (j === i) return;
                   if (Math.abs(o.dir.dot(e.dir)) > 0.99 && o.mid.distanceTo(e.mid) > 0.2)
                     targets.add(j);
@@ -1810,13 +1820,29 @@ export function CadApp() {
 
             {/* Size: big steppers, tap the number to type an exact value. */}
             <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {(lockStretch
-                ? ([["size", size, setSize]] as const)
-                : ([
-                    ["x", stretch[0] ?? 1, (v: number) => setStretch((s) => [v, s[1], s[2]])],
-                    ["y", stretch[1] ?? 1, (v: number) => setStretch((s) => [s[0], v, s[2]])],
-                    ["z", stretch[2] ?? 1, (v: number) => setStretch((s) => [s[0], s[1], v])],
-                  ] as const)
+              {(
+                (lockStretch
+                  ? [["size", size, (v: number) => setSize(v)]]
+                  : [
+                      [
+                        "x",
+                        stretch[0] ?? 1,
+                        (v: number) =>
+                          setStretch((s) => [v, s[1], s[2]] as [number, number, number]),
+                      ],
+                      [
+                        "y",
+                        stretch[1] ?? 1,
+                        (v: number) =>
+                          setStretch((s) => [s[0], v, s[2]] as [number, number, number]),
+                      ],
+                      [
+                        "z",
+                        stretch[2] ?? 1,
+                        (v: number) =>
+                          setStretch((s) => [s[0], s[1], v] as [number, number, number]),
+                      ],
+                    ]) as [string, number, (v: number) => void][]
               ).map(([label, value, set]) => (
                 <div
                   key={label}
@@ -1867,7 +1893,7 @@ export function CadApp() {
                 </span>
               </div>
               <div className="flex gap-1 overflow-x-auto pb-1">
-                {edges.map((e, i) => {
+                {edges.map((_e: (typeof edges)[number], i: number) => {
                   const m = modOf(i);
                   const on = selEdges.includes(i);
                   return (
@@ -2531,7 +2557,7 @@ export function CadApp() {
         />
       </Canvas>
 
-      <AxisHud step={step} />
+
 
       {/* Clear-screen mode: only Add + a way back, over the bare world */}
       {clearHud && (
