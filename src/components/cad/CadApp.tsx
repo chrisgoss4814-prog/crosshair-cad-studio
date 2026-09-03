@@ -1527,7 +1527,9 @@ export function CadApp() {
       setEdgeMods((prev) => {
         const next = [...prev];
         const targets = new Set(selEdges);
-        if (mirrorEdges) {
+        // Curving only ever touches the edges you picked — mirroring would
+        // bend lines you never selected.
+        if (mirrorEdges && field !== "curve") {
           // Mirror onto the opposite parallel edge so boxes stay square.
           for (const i of selEdges) {
             const e = edges[i];
@@ -1548,6 +1550,8 @@ export function CadApp() {
         }
         return next;
       });
+    };
+
     return { inc, dec, edges, modOf, bumpEdge };
   };
 
@@ -2680,6 +2684,13 @@ export function CadApp() {
         </div>
       )}
 
+      {/* Shapes: sizing controls ride the top edge so the view stays clear */}
+      {cat === "place" && !clearHud && (
+        <div className="pointer-events-auto absolute inset-x-0 top-11 z-40 overflow-x-auto border-b border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
+          {shapesTopStrip()}
+        </div>
+      )}
+
       {/* Alignment readout — sits just under the top edge strip */}
       {alignedAxes.length > 0 && !clearHud && (
         <div className="pointer-events-none absolute left-1/2 top-14 z-40 -translate-x-1/2 rounded-md border border-axis-y/60 bg-panel/85 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-axis-y backdrop-blur-md">
@@ -2691,7 +2702,13 @@ export function CadApp() {
       <div
         className={`pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col gap-2 p-2${clearHud ? " hidden" : ""}`}
       >
-        {focused && !collapsed && (
+        {cat === "place" && (
+          <div className="pointer-events-auto w-full overflow-x-auto rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 shadow-hud backdrop-blur-md">
+            {shapesBottomStrip()}
+          </div>
+        )}
+
+        {focused && cat !== "place" && !collapsed && (
           <div className="pointer-events-auto mx-auto w-full max-w-[440px] rounded-lg border border-grid-line bg-panel/90 px-2.5 py-2 shadow-hud backdrop-blur-md">
             <div className="mb-1.5 flex items-center justify-between">
               <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
