@@ -855,11 +855,13 @@ export function CadApp() {
     // keeps building the same aligned stack.
     if (tapTarget.point && tapTarget.normal) {
       const n = tapTarget.normal.clone();
-      tapTarget.point = new THREE.Vector3(p.x, p.y, p.z);
+      const q = next.position;
+      tapTarget.point = new THREE.Vector3(q[0], q[1], q[2]);
       tapTarget.normal = n;
       tapTarget.objectId = next.id;
-      setTapPoint([p.x, p.y, p.z]);
+      setTapPoint([q[0], q[1], q[2]]);
     } else {
+
       clearTap();
     }
   };
