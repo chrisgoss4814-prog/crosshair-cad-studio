@@ -272,10 +272,12 @@ export function applyEdgeMods(
       const d = perp.length();
       const w = smooth(1 - d / reach);
       if (w <= 0) continue;
-      // Along the edge: full effect at the middle, nothing at the ends, so
-      // the neighbouring perpendicular edges keep their corners.
+      // Along the edge: strongest at the middle, but the ends still take a
+      // uniform share, so the corners travel outward together and the faces
+      // they belong to grow/shrink instead of pinching.
       const t = THREE.MathUtils.clamp(along / half, -1, 1);
-      const wAlong = e.loop ? 1 : Math.max(0, 1 - t * t);
+      const bow = Math.max(0, 1 - t * t);
+      const wAlong = e.loop ? 1 : END_SHARE + (1 - END_SHARE) * bow;
       disp.set(0, 0, 0);
       if (m.curve) disp.addScaledVector(e.out, m.curve * w * wAlong);
       if (tan) disp.addScaledVector(e.out, tan * t * half * w);
