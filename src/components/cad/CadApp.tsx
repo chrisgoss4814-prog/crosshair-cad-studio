@@ -424,6 +424,7 @@ export function CadApp() {
   const [lockStretch, setLockStretch] = useState(true);
   const [sides, setSides] = useState(6);
   const [extrude, setExtrude] = useState(0);
+  const [taper, setTaper] = useState(0);
   const [edgeMods, setEdgeMods] = useState<EdgeMod[]>([]);
   const [selEdges, setSelEdges] = useState<number[]>([]);
   const [mirrorEdges, setMirrorEdges] = useState(true);
@@ -741,8 +742,8 @@ export function CadApp() {
   }, [size, lockStretch]);
 
   const ghostSpec = useMemo<GeometrySpec>(
-    () => ({ kind, sides, extrude, edges: edgeMods, profile: null }),
-    [kind, sides, extrude, edgeMods],
+    () => ({ kind, sides, extrude, edges: edgeMods, profile: null, taper }),
+    [kind, sides, extrude, edgeMods, taper],
   );
 
   const ghostEdges = useMemo(() => edgesOf(ghostSpec), [ghostSpec]);
@@ -768,6 +769,19 @@ export function CadApp() {
     },
     [selectedIds],
   );
+
+  /**
+   * Taper scales every horizontal slice of the shape: the outline stays the
+   * same (square stays square, circle stays circle) and only its size changes
+   * from bottom to top. Applies to the centred ghost and to any selection.
+   */
+  const bumpTaper = (d: number) => {
+    setTaper((v) => {
+      const next = +Math.max(-1, Math.min(1, v + d)).toFixed(4);
+      updateSelected((o) => ({ ...o, taper: next }));
+      return next;
+    });
+  };
 
   const clearTap = () => {
     tapTarget.point = null;
@@ -806,6 +820,7 @@ export function CadApp() {
         sides,
         extrude,
         edges: edgeMods,
+        taper,
         rotation: faceHost
           ? ([...faceHost.rotation] as [number, number, number])
           : ([0, ghostYaw.value, 0] as [number, number, number]),
@@ -1764,6 +1779,22 @@ export function CadApp() {
               </Chip>
             ))}
           </div>
+        </div>
+        <div className="mt-1.5 flex flex-nowrap items-center gap-1.5 border-t border-grid-line pt-1.5">
+          <span className="font-mono text-[10px] uppercase text-muted-foreground">
+            taper
+          </span>
+          <Btn onClick={() => bumpTaper(-inc)}>−</Btn>
+          <span className="min-w-14 text-center font-mono text-xs">
+            {dec(taper)}
+          </span>
+          <Btn onClick={() => bumpTaper(inc)}>+</Btn>
+          <Chip active={false} onClick={() => bumpTaper(-taper)}>
+            flat
+          </Chip>
+          <span className="whitespace-nowrap font-mono text-[10px] text-muted-foreground">
+            {taper > 0 ? "wider top" : taper < 0 ? "wider base" : "straight"}
+          </span>
         </div>
         {advanced && (
           <div className="mt-1.5 flex flex-nowrap items-center gap-1.5 border-t border-grid-line pt-1.5">
