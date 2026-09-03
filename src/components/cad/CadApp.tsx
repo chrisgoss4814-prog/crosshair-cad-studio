@@ -1751,7 +1751,11 @@ export function CadApp() {
           </>
         );
 
-      case "place": {
+      // Shapes lives in its own top + bottom edge strips, never in this panel.
+      case "place":
+        return null;
+
+      case "__place_unused": {
         const inc = +(digit * Math.pow(10, -places)).toFixed(6);
         const dec = (n: number) => n.toFixed(Math.min(3, places + 1));
         const edges = ghostEdges;
