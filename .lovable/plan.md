@@ -80,3 +80,5 @@ Add / Place-here button, Repeat, recent-shape quick bar, Confirm toggle, snappin
 - Edge highlight + swipe cycling + multi-select is pure UI state in `CadApp.tsx` (`selectedEdge`, `selectedEdges`).
 - **Mirror curve**: when applying a curve to a multi-selection of parallel edges, the sign of the curve is flipped per edge based on its outward face normal, so opposite edges bow oppositely.
 - Remove `bend`, `taper`, `bendAxis`, and corner `curve` from `GeometrySpec`, `specOf`, `buildGeometry`, `PlacedObject`, and the AI builder tool schema. Existing saved scenes with those fields hydrate to ignored values.
+- **Scene**: delete the opaque ground `planeGeometry` in `Scene.tsx` and move its pointer handlers to an invisible (`visible={false}`) pick plane; keep the drei `<Grid />` with `side={THREE.DoubleSide}`; extend the Y axis line downward. Delete `AxisHud.tsx` usage and replace it with a compact corner coordinate chip fed by the existing `subscribeCenter` store; `tickUnitFor` becomes unused and is removed.
+
