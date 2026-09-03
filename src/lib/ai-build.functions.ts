@@ -15,9 +15,6 @@ const StepSchema = z.object({
   rz: z.number(),
   extrude: z.number(),
   sides: z.number(),
-  curve: z.number(),
-  bend: z.number(),
-  taper: z.number(),
   color: z.string(),
   note: z.string(),
 });
@@ -66,9 +63,6 @@ const JSON_SCHEMA = {
           "rz",
           "extrude",
           "sides",
-          "curve",
-          "bend",
-          "taper",
           "color",
           "note",
         ],
@@ -86,9 +80,6 @@ const JSON_SCHEMA = {
           rz: { type: "number" },
           extrude: { type: "number" },
           sides: { type: "number" },
-          curve: { type: "number" },
-          bend: { type: "number" },
-          taper: { type: "number" },
           color: { type: "string" },
           note: { type: "string" },
         },
@@ -112,8 +103,7 @@ Step fields:
 - op: "place" adds a shape; "cut" subtracts that shape from any solids it overlaps (use for holes, windows, doorways, slots).
 - sx/sy/sz: size in metres on each axis (stretch).
 - rx/ry/rz: rotation in RADIANS.
-- sides: for polygon/star/cylinder facet count (default 6). curve: 0..1 corner rounding for rect.
-- bend: bend angle in radians (0 = straight). taper: 0..1 pinch toward the top.
+- sides: for polygon/star/cylinder facet count (default 6).
 - color: hex string.
 - note: 4-8 word description of that step.
 
