@@ -294,7 +294,39 @@ export type GeometrySpec = {
   profile: Shape2D | null;
   /** Per-edge curve / angle tweaks applied to the unit geometry. */
   edges: EdgeMod[];
+  /**
+   * Cross-section taper along the vertical axis. Every horizontal slice keeps
+   * its own shape (square stays square, circle stays circle) and only changes
+   * size: positive widens the top, negative widens the bottom.
+   */
+  taper?: number;
 };
+
+/**
+ * Scales each horizontal slice of a geometry about the vertical axis, so the
+ * shape reads like stacked slices of the same outline at different sizes.
+ */
+export function applyTaper(geo: THREE.BufferGeometry, taper: number) {
+  const t = THREE.MathUtils.clamp(taper, -1, 1);
+  if (!t) return geo;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox!;
+  const y0 = bb.min.y;
+  const h = bb.max.y - y0;
+  if (h < 1e-6) return geo;
+  const pos = geo.getAttribute("position") as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const k = 1 + t * ((y - y0) / h - 0.5);
+    const f = Math.max(0.02, k);
+    pos.setX(i, pos.getX(i) * f);
+    pos.setZ(i, pos.getZ(i) * f);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+  return geo;
+}
 
 const cache = new Map<string, THREE.BufferGeometry>();
 
