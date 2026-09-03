@@ -21,6 +21,7 @@ import {
   centerPoint,
   placePoint,
   ghostYaw,
+  ghostBlocked,
   computeCenterPoint,
   alignOnFace,
   controls,
@@ -390,6 +391,18 @@ function CenterProbe({
       placePoint.copy(point);
     }
 
+    // Is the landing spot already occupied? Used to tint the ghost red.
+    const box = new THREE.Box3().setFromCenterAndSize(
+      placePoint,
+      new THREE.Vector3(half.x * 2, half.y * 2, half.z * 2),
+    );
+    let hit = false;
+    meshRegistry.forEach((m) => {
+      if (hit) return;
+      if (meshWorldBox(m).intersectsBox(box)) hit = true;
+    });
+    ghostBlocked.value = hit && !tapTarget.point;
+
     accum.current += delta;
     if (accum.current >= 1 / 30) {
       accum.current = 0;
@@ -424,7 +437,11 @@ function Ghost({
     if (!ref.current) return;
     ref.current.position.copy(centerPoint);
     ref.current.rotation.y = ghostYaw.value;
+    if (matRef.current) {
+      matRef.current.color.set(ghostBlocked.value ? "#ff4d4d" : material.color);
+    }
   });
+  const matRef = useRef<THREE.MeshBasicMaterial | null>(null);
   const ghostMat = useMemo(
     () =>
       new THREE.MeshBasicMaterial({
@@ -450,6 +467,7 @@ function Ghost({
     [ghostMat, pipMat],
   );
   const pipGeo = useMemo(() => new THREE.SphereGeometry(0.035, 10, 10), []);
+  matRef.current = ghostMat;
 
   return (
     <group ref={ref}>

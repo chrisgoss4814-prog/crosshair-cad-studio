@@ -800,21 +800,43 @@ export function CadApp() {
     const faceHost = tapTarget.objectId
       ? objects.find((o) => o.id === tapTarget.objectId)
       : null;
-    const next = makeObject(kind, [p.x, p.y, p.z], size, material, {
-      scale: [...stretch] as [number, number, number],
-      sides,
-      extrude,
-      edges: edgeMods,
-      rotation: faceHost
-        ? ([...faceHost.rotation] as [number, number, number])
-        : ([0, ghostYaw.value, 0] as [number, number, number]),
-    });
+    const build = (at: [number, number, number]) =>
+      makeObject(kind, at, size, material, {
+        scale: [...stretch] as [number, number, number],
+        sides,
+        extrude,
+        edges: edgeMods,
+        rotation: faceHost
+          ? ([...faceHost.rotation] as [number, number, number])
+          : ([0, ghostYaw.value, 0] as [number, number, number]),
+      });
+    let next = build([p.x, p.y, p.z]);
     // Face-snapped placements rest on the tapped face and are allowed to pass
     // through other objects in the way; blocking resumes once placed.
     if (!faceHost && wouldCollide(next, [])) {
-      toast.error("Blocked — that spot overlaps another object");
-      return;
+      // Instead of refusing, slide the new shape to the nearest free lattice
+      // spot: along the direction you are facing first, then upward.
+      const span = worldBoxOf(next).getSize(new THREE.Vector3());
+      const yaw = ghostYaw.value;
+      const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      const stepF = Math.max(0.05, Math.abs(fwd.x) * span.x + Math.abs(fwd.z) * span.z);
+      const stepY = Math.max(0.05, span.y);
+      const tries: [number, number, number][] = [];
+      for (let k = 1; k <= 6; k++) {
+        tries.push([p.x + fwd.x * stepF * k, p.y, p.z + fwd.z * stepF * k]);
+        tries.push([p.x - fwd.x * stepF * k, p.y, p.z - fwd.z * stepF * k]);
+        tries.push([p.x, p.y + stepY * k, p.z]);
+      }
+      const free = tries
+        .map((t) => build(t))
+        .find((cand) => !wouldCollide(cand, []));
+      if (!free) {
+        toast.error("Blocked — no free space near that spot");
+        return;
+      }
+      next = free;
     }
+
     setObjects((prev) => [...prev, next]);
     setLastPlacedId(next.id);
     const spec: RecentSpec = {
@@ -833,11 +855,13 @@ export function CadApp() {
     // keeps building the same aligned stack.
     if (tapTarget.point && tapTarget.normal) {
       const n = tapTarget.normal.clone();
-      tapTarget.point = new THREE.Vector3(p.x, p.y, p.z);
+      const q = next.position;
+      tapTarget.point = new THREE.Vector3(q[0], q[1], q[2]);
       tapTarget.normal = n;
       tapTarget.objectId = next.id;
-      setTapPoint([p.x, p.y, p.z]);
+      setTapPoint([q[0], q[1], q[2]]);
     } else {
+
       clearTap();
     }
   };
@@ -1560,7 +1584,7 @@ export function CadApp() {
     const { inc, dec } = shapesCtl();
     return (
       <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-nowrap items-center gap-1.5">
           <span className="font-mono text-[10px] uppercase text-muted-foreground">
             step
           </span>
@@ -1577,7 +1601,7 @@ export function CadApp() {
           <span className="font-mono text-[10px] text-accent">±{inc}</span>
         </div>
         {/* Size: big steppers, tap the number to type an exact value. */}
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <div className="mt-1.5 flex flex-nowrap gap-1.5">
           {(
             (lockStretch
               ? [["size", size, (v: number) => setSize(v)]]
@@ -1637,7 +1661,7 @@ export function CadApp() {
     void edges;
     return (
       <div className="flex flex-col gap-1">
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <div className="mt-1.5 flex flex-nowrap items-center gap-1.5">
           <Chip active={lockStretch} onClick={() => setLockStretch((l) => !l)}>
             {lockStretch ? "uniform" : "per-edge"}
           </Chip>
@@ -1706,7 +1730,7 @@ export function CadApp() {
               </span>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap gap-1.5">
+          <div className="mt-1 flex flex-nowrap gap-1.5">
             <div className="flex items-center gap-1 rounded-md border border-grid-line bg-panel/70 p-1">
               <span className="w-9 font-mono text-[10px] uppercase text-muted-foreground">
                 curve
@@ -1742,7 +1766,7 @@ export function CadApp() {
           </div>
         </div>
         {advanced && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-grid-line pt-1.5">
+          <div className="mt-1.5 flex flex-nowrap items-center gap-1.5 border-t border-grid-line pt-1.5">
             <Chip
               active={is2D(kind)}
               onClick={() => setKind(is2D(kind) ? "box" : "rect")}
@@ -2684,12 +2708,8 @@ export function CadApp() {
         </div>
       )}
 
-      {/* Shapes: sizing controls ride the top edge so the view stays clear */}
-      {cat === "place" && !clearHud && (
-        <div className="pointer-events-auto absolute inset-x-0 top-11 z-40 overflow-x-auto border-b border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
-          {shapesTopStrip()}
-        </div>
-      )}
+
+
 
       {/* Alignment readout — sits just under the top edge strip */}
       {alignedAxes.length > 0 && !clearHud && (
@@ -2702,11 +2722,36 @@ export function CadApp() {
       <div
         className={`pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col gap-2 p-2${clearHud ? " hidden" : ""}`}
       >
-        {cat === "place" && (
-          <div className="pointer-events-auto w-full overflow-x-auto rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 shadow-hud backdrop-blur-md">
-            {shapesBottomStrip()}
+        {cat === "place" && !collapsed && (
+          <div className="pointer-events-auto w-full rounded-lg border border-grid-line bg-panel/85 px-2 py-1 shadow-hud backdrop-blur-md">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
+                shapes
+              </span>
+              <div className="flex gap-1.5">
+                <Btn onClick={() => setCollapsed(true)}>▾</Btn>
+                <Btn onClick={() => setCat(null)}>✕</Btn>
+              </div>
+            </div>
+            <div className="max-h-[11vh] overflow-x-auto overflow-y-auto">
+              <div className="flex w-max items-start gap-3">
+                {shapesTopStrip()}
+                {shapesBottomStrip()}
+              </div>
+            </div>
           </div>
         )}
+
+        {cat === "place" && collapsed && (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            className="pointer-events-auto mx-auto rounded-full border border-grid-line bg-panel/85 px-6 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground backdrop-blur-md"
+          >
+            shapes ▲
+          </button>
+        )}
+
 
         {focused && cat !== "place" && !collapsed && (
           <div className="pointer-events-auto mx-auto w-full max-w-[440px] rounded-lg border border-grid-line bg-panel/90 px-2.5 py-2 shadow-hud backdrop-blur-md">
@@ -2723,7 +2768,7 @@ export function CadApp() {
           </div>
         )}
 
-        {focused && collapsed && (
+        {focused && cat !== "place" && collapsed && (
           <button
             type="button"
             onClick={() => setCollapsed(false)}
