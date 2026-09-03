@@ -419,11 +419,13 @@ export function CadApp() {
   const [stretch, setStretch] = useState<[number, number, number]>([1, 1, 1]);
   const [lockStretch, setLockStretch] = useState(true);
   const [sides, setSides] = useState(6);
-  const [curve, setCurve] = useState(0);
   const [extrude, setExtrude] = useState(0);
-  const [bend, setBend] = useState(0);
-  const [bendAxis, setBendAxis] = useState<0 | 1 | 2>(1);
-  const [taper, setTaper] = useState(0);
+  const [edgeMods, setEdgeMods] = useState<EdgeMod[]>([]);
+  const [selEdges, setSelEdges] = useState<number[]>([]);
+  const [mirrorEdges, setMirrorEdges] = useState(true);
+  const [advanced, setAdvanced] = useState(false);
+  const [digit, setDigit] = useState(1);
+  const [places, setPlaces] = useState(1);
   const [step, setStep] = useState(0.1);
   const [rotStep, setRotStep] = useState(90);
   const [depth, setDepth] = useState(6);
@@ -477,11 +479,8 @@ export function CadApp() {
     size: number;
     stretch: [number, number, number];
     sides: number;
-    curve: number;
     extrude: number;
-    bend: number;
-    bendAxis: 0 | 1 | 2;
-    taper: number;
+    edges: EdgeMod[];
   };
   const [recent, setRecent] = useState<RecentSpec[]>([]);
 
@@ -738,8 +737,8 @@ export function CadApp() {
   }, [size, lockStretch]);
 
   const ghostSpec = useMemo<GeometrySpec>(
-    () => ({ kind, sides, curve, extrude, bend, bendAxis, taper, profile: null }),
-    [kind, sides, curve, extrude, bend, bendAxis, taper],
+    () => ({ kind, sides, extrude, edges: edgeMods, profile: null }),
+    [kind, sides, extrude, edgeMods],
   );
 
   const selectedObjects = useMemo(
@@ -792,11 +791,8 @@ export function CadApp() {
     const next = makeObject(kind, [p.x, p.y, p.z], size, material, {
       scale: [...stretch] as [number, number, number],
       sides,
-      curve,
       extrude,
-      bend,
-      bendAxis,
-      taper,
+      edges: edgeMods,
       ...(faceHost ? { rotation: [...faceHost.rotation] as [number, number, number] } : {}),
     });
     // Face-snapped placements rest on the tapped face and are allowed to pass
@@ -812,11 +808,8 @@ export function CadApp() {
       size,
       stretch: [...stretch] as [number, number, number],
       sides,
-      curve,
       extrude,
-      bend,
-      bendAxis,
-      taper,
+      edges: edgeMods,
     };
     setRecent((prev) => {
       const key = JSON.stringify(spec);
@@ -841,11 +834,8 @@ export function CadApp() {
     setStretch([...r.stretch] as [number, number, number]);
     setLockStretch(false);
     setSides(r.sides);
-    setCurve(r.curve);
     setExtrude(r.extrude);
-    setBend(r.bend);
-    setBendAxis(r.bendAxis);
-    setTaper(r.taper);
+    setEdgeMods(r.edges ?? []);
   };
 
   /** Place another copy of the last object, offset beside it like a brick. */
@@ -1036,16 +1026,13 @@ export function CadApp() {
       spec: {
         kind,
         sides,
-        curve,
         extrude: is2D(kind) ? 1 : 0,
-        bend: 0,
-        bendAxis: 1,
-        taper: 0,
+        edges: [],
         profile: null,
       },
       ...cutTransform,
     };
-  }, [cutPick, cutTransform, kind, sides, curve]);
+  }, [cutPick, cutTransform, kind, sides]);
 
   const applyCut = () => {
     if (!cutPick || !cutTransform) return;
@@ -1054,7 +1041,6 @@ export function CadApp() {
       op: "subtract",
       kind,
       sides,
-      curve,
       extrude: is2D(kind) ? 1 : 0,
       position: cutTransform.position,
       rotation: cutTransform.rotation,
@@ -1103,7 +1089,6 @@ export function CadApp() {
       op,
       kind: t.kind,
       sides: t.sides ?? 6,
-      curve: t.curve ?? 0,
       extrude: t.extrude ?? 0,
       position: t.position,
       rotation: t.rotation,
@@ -1376,10 +1361,7 @@ export function CadApp() {
             ] as [number, number, number],
             rotation: [s.rx, s.ry, s.rz] as [number, number, number],
             sides: Math.max(3, Math.round(s.sides || 6)),
-            curve: THREE.MathUtils.clamp(s.curve, 0, 1),
             extrude: Math.max(0, s.extrude),
-            bend: s.bend,
-            taper: THREE.MathUtils.clamp(s.taper, 0, 1),
           },
         );
         created.push(o);
@@ -1390,7 +1372,6 @@ export function CadApp() {
           op: "subtract",
           kind: kindOk,
           sides: Math.max(3, Math.round(s.sides || 6)),
-          curve: THREE.MathUtils.clamp(s.curve, 0, 1),
           extrude: is2D(kindOk) ? Math.max(0.01, s.extrude || 1) : 0,
           position: [s.x, s.y, s.z],
           rotation: [s.rx, s.ry, s.rz],
