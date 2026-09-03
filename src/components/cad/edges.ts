@@ -316,6 +316,92 @@ export function applyEdgeMods(
     }
   }
 
+  // Rebuild flat faces whose own lines were never curved from their (moved)
+  // corners. A cube's base therefore stays a true square — it only grows or
+  // shrinks as the upright lines bow out or in.
+  {
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < pos.count; i++) {
+      for (let k = 0; k < 3; k++) {
+        const c = orig[i * 3 + k]!;
+        if (c < lo[k]!) lo[k] = c;
+        if (c > hi[k]!) hi[k] = c;
+      }
+    }
+    const EPS = 1e-5;
+    const p00 = new THREE.Vector3();
+    const p10 = new THREE.Vector3();
+    const p01 = new THREE.Vector3();
+    const p11 = new THREE.Vector3();
+    const tmp = new THREE.Vector3();
+
+    for (let axis = 0; axis < 3; axis++) {
+      const u = (axis + 1) % 3;
+      const w2 = (axis + 2) % 3;
+      for (const bound of [lo[axis]!, hi[axis]!]) {
+        if (!Number.isFinite(bound)) continue;
+        const group: number[] = [];
+        for (let i = 0; i < pos.count; i++) {
+          if (Math.abs(orig[i * 3 + axis]! - bound) < EPS) group.push(i);
+        }
+        if (group.length < 4) continue;
+
+        // Skip faces that a curved edge actually lies on.
+        const onFace = active.some((m) => {
+          const e = edges[m.i];
+          if (!e) return false;
+          return e.points.every(
+            (p) => Math.abs(p.getComponent(axis) - bound) < EPS,
+          );
+        });
+        if (onFace) continue;
+
+        let u0 = Infinity;
+        let u1 = -Infinity;
+        let w0 = Infinity;
+        let w1 = -Infinity;
+        for (const i of group) {
+          const cu = orig[i * 3 + u]!;
+          const cw = orig[i * 3 + w2]!;
+          if (cu < u0) u0 = cu;
+          if (cu > u1) u1 = cu;
+          if (cw < w0) w0 = cw;
+          if (cw > w1) w1 = cw;
+        }
+        if (u1 - u0 < 1e-4 || w1 - w0 < 1e-4) continue;
+
+        const at = (cu: number, cw: number) =>
+          group.find(
+            (i) =>
+              Math.abs(orig[i * 3 + u]! - cu) < EPS &&
+              Math.abs(orig[i * 3 + w2]! - cw) < EPS,
+          );
+        const i00 = at(u0, w0);
+        const i10 = at(u1, w0);
+        const i01 = at(u0, w1);
+        const i11 = at(u1, w1);
+        if (i00 == null || i10 == null || i01 == null || i11 == null) continue;
+
+        p00.fromBufferAttribute(pos, i00);
+        p10.fromBufferAttribute(pos, i10);
+        p01.fromBufferAttribute(pos, i01);
+        p11.fromBufferAttribute(pos, i11);
+
+        for (const i of group) {
+          const su = (orig[i * 3 + u]! - u0) / (u1 - u0);
+          const sv = (orig[i * 3 + w2]! - w0) / (w1 - w0);
+          v.copy(p00).lerp(p10, su);
+          tmp.copy(p01).lerp(p11, su);
+          v.lerp(tmp, sv);
+          pos.setXYZ(i, v.x, v.y, v.z);
+        }
+      }
+    }
+  }
+
+
+
   pos.needsUpdate = true;
   geo.computeVertexNormals();
   geo.computeBoundingBox();
