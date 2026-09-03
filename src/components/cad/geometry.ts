@@ -337,6 +337,7 @@ export function specKey(s: GeometrySpec) {
     s.extrude,
     s.profile ?? "-",
     edgeModsKey(s.edges ?? []),
+    +(s.taper ?? 0).toFixed(3),
   ].join("|");
 }
 
