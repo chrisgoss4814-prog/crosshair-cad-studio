@@ -2722,11 +2722,36 @@ export function CadApp() {
       <div
         className={`pointer-events-none absolute inset-x-0 bottom-0 z-40 flex flex-col gap-2 p-2${clearHud ? " hidden" : ""}`}
       >
-        {cat === "place" && (
-          <div className="pointer-events-auto w-full overflow-x-auto rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 shadow-hud backdrop-blur-md">
-            {shapesBottomStrip()}
+        {cat === "place" && !collapsed && (
+          <div className="pointer-events-auto w-full rounded-lg border border-grid-line bg-panel/85 px-2 py-1 shadow-hud backdrop-blur-md">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
+                shapes
+              </span>
+              <div className="flex gap-1.5">
+                <Btn onClick={() => setCollapsed(true)}>▾</Btn>
+                <Btn onClick={() => setCat(null)}>✕</Btn>
+              </div>
+            </div>
+            <div className="max-h-[15vh] overflow-x-auto overflow-y-auto">
+              <div className="flex w-max items-start gap-3">
+                {shapesTopStrip()}
+                {shapesBottomStrip()}
+              </div>
+            </div>
           </div>
         )}
+
+        {cat === "place" && collapsed && (
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            className="pointer-events-auto mx-auto rounded-full border border-grid-line bg-panel/85 px-6 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground backdrop-blur-md"
+          >
+            shapes ▲
+          </button>
+        )}
+
 
         {focused && cat !== "place" && !collapsed && (
           <div className="pointer-events-auto mx-auto w-full max-w-[440px] rounded-lg border border-grid-line bg-panel/90 px-2.5 py-2 shadow-hud backdrop-blur-md">
