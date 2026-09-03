@@ -792,7 +792,7 @@ export function CadApp() {
       return;
     }
     setArmed(false);
-    const p = centerPoint;
+    const p = placePoint;
     // Placing on a tapped face copies that object's rotation so faces stay
     // parallel and the stack reads square.
     const faceHost = tapTarget.objectId
