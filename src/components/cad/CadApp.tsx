@@ -800,21 +800,43 @@ export function CadApp() {
     const faceHost = tapTarget.objectId
       ? objects.find((o) => o.id === tapTarget.objectId)
       : null;
-    const next = makeObject(kind, [p.x, p.y, p.z], size, material, {
-      scale: [...stretch] as [number, number, number],
-      sides,
-      extrude,
-      edges: edgeMods,
-      rotation: faceHost
-        ? ([...faceHost.rotation] as [number, number, number])
-        : ([0, ghostYaw.value, 0] as [number, number, number]),
-    });
+    const build = (at: [number, number, number]) =>
+      makeObject(kind, at, size, material, {
+        scale: [...stretch] as [number, number, number],
+        sides,
+        extrude,
+        edges: edgeMods,
+        rotation: faceHost
+          ? ([...faceHost.rotation] as [number, number, number])
+          : ([0, ghostYaw.value, 0] as [number, number, number]),
+      });
+    let next = build([p.x, p.y, p.z]);
     // Face-snapped placements rest on the tapped face and are allowed to pass
     // through other objects in the way; blocking resumes once placed.
     if (!faceHost && wouldCollide(next, [])) {
-      toast.error("Blocked — that spot overlaps another object");
-      return;
+      // Instead of refusing, slide the new shape to the nearest free lattice
+      // spot: along the direction you are facing first, then upward.
+      const span = worldBoxOf(next).getSize(new THREE.Vector3());
+      const yaw = ghostYaw.value;
+      const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      const stepF = Math.max(0.05, Math.abs(fwd.x) * span.x + Math.abs(fwd.z) * span.z);
+      const stepY = Math.max(0.05, span.y);
+      const tries: [number, number, number][] = [];
+      for (let k = 1; k <= 6; k++) {
+        tries.push([p.x + fwd.x * stepF * k, p.y, p.z + fwd.z * stepF * k]);
+        tries.push([p.x - fwd.x * stepF * k, p.y, p.z - fwd.z * stepF * k]);
+        tries.push([p.x, p.y + stepY * k, p.z]);
+      }
+      const free = tries
+        .map((t) => build(t))
+        .find((cand) => !wouldCollide(cand, []));
+      if (!free) {
+        toast.error("Blocked — no free space near that spot");
+        return;
+      }
+      next = free;
     }
+
     setObjects((prev) => [...prev, next]);
     setLastPlacedId(next.id);
     const spec: RecentSpec = {
