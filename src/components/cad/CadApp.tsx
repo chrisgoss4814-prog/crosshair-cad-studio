@@ -1858,7 +1858,7 @@ export function CadApp() {
                     type="button"
                     className="min-w-14 rounded bg-panel px-1.5 py-1 font-mono text-xs text-foreground"
                     onClick={() => {
-                      const v = prompt(`${label} (m)`, String(value));
+                      const v = window.prompt(`${label} (m)`, String(value));
                       const n = Number(v);
                       if (v !== null && Number.isFinite(n) && n > 0) set(n);
                     }}
