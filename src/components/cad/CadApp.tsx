@@ -2660,9 +2660,9 @@ export function CadApp() {
         </div>
       )}
 
-      {/* Alignment readout */}
+      {/* Alignment readout — sits just under the top edge strip */}
       {alignedAxes.length > 0 && !clearHud && (
-        <div className="pointer-events-none absolute left-1/2 top-3 z-40 -translate-x-1/2 rounded-md border border-axis-y/60 bg-panel/85 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-axis-y backdrop-blur-md">
+        <div className="pointer-events-none absolute left-1/2 top-14 z-40 -translate-x-1/2 rounded-md border border-axis-y/60 bg-panel/85 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-axis-y backdrop-blur-md">
           aligned on {alignedAxes.join(" · ")}
         </div>
       )}
