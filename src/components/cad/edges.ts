@@ -209,6 +209,9 @@ function orderPolyline(list: { a: THREE.Vector3; b: THREE.Vector3 }[]) {
   return chain;
 }
 
+/** Share of a curve that the edge's own endpoints (corners) receive. */
+const END_SHARE = 0.35;
+
 function smooth(t: number) {
   const k = THREE.MathUtils.clamp(t, 0, 1);
   return k * k * (3 - 2 * k);
