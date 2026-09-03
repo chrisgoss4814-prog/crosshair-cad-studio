@@ -350,33 +350,8 @@ function CenterProbe({
     sceneRefs.width = viewport.width;
     sceneRefs.height = viewport.height;
 
-    if (tapTarget.point) {
-      // Rest the pending shape on the tapped face, aligned across it.
-      const n = tapTarget.normal;
-      const targetMesh = tapTarget.objectId
-        ? meshRegistry.get(tapTarget.objectId)
-        : null;
-      if (n && targetMesh) {
-        centerPoint.copy(
-          alignOnFace(meshWorldBox(targetMesh), n, half, alignMode),
-        );
-      } else {
-        centerPoint.copy(tapTarget.point);
-        if (n) centerPoint.addScaledVector(n, halfFor(n));
-      }
-      accum.current += delta;
-      if (accum.current >= 1 / 30) {
-        accum.current = 0;
-        publishCenter({
-          x: centerPoint.x,
-          y: centerPoint.y,
-          z: centerPoint.z,
-          onSurface: true,
-        });
-      }
-      return;
-    }
-
+    // The ghost never leaves the screen centre: centerPoint always tracks the
+    // lattice point straight ahead.
     const { point, onSurface } = computeCenterPoint(camera, raycaster, {
       depth,
       size,
@@ -389,14 +364,36 @@ function CenterProbe({
     });
     centerPoint.copy(point);
 
+    // The ghost turns with the camera so it always presents a face to you.
+    const e = new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ");
+    ghostYaw.value = e.y;
+
+    // Where it would actually land: flush on the tapped face when one is set.
+    let surface = onSurface;
+    if (tapTarget.point) {
+      const n = tapTarget.normal;
+      const targetMesh = tapTarget.objectId
+        ? meshRegistry.get(tapTarget.objectId)
+        : null;
+      if (n && targetMesh) {
+        placePoint.copy(alignOnFace(meshWorldBox(targetMesh), n, half, alignMode));
+      } else {
+        placePoint.copy(tapTarget.point);
+        if (n) placePoint.addScaledVector(n, halfFor(n));
+      }
+      surface = true;
+    } else {
+      placePoint.copy(point);
+    }
+
     accum.current += delta;
     if (accum.current >= 1 / 30) {
       accum.current = 0;
       publishCenter({
-        x: point.x,
-        y: point.y,
-        z: point.z,
-        onSurface,
+        x: placePoint.x,
+        y: placePoint.y,
+        z: placePoint.z,
+        onSurface: surface,
       });
     }
   });
