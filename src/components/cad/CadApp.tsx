@@ -1794,7 +1794,7 @@ export function CadApp() {
               ))}
               {[0, 1, 2, 3].map((pl) => (
                 <Chip key={pl} active={places === pl} onClick={() => setPlaces(pl)}>
-                  {pl === 0 ? "1" : `.${"0".repeat(pl - 1)}1`}
+                  {pl === 0 ? "×1" : `×.${"0".repeat(pl - 1)}1`}
                 </Chip>
               ))}
               <span className="font-mono text-[10px] text-accent">±{inc}</span>
