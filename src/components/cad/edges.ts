@@ -216,9 +216,13 @@ function smooth(t: number) {
 
 /**
  * Applies per-edge curve (outward bulge) and angle (tilt about the midpoint) to
- * a unit-sized geometry. Each edge deforms the vertices nearest to it, so
- * curving four parallel edges of a box bows each corner outward — mirrored
- * across the shape rather than all leaning the same way.
+ * a unit-sized geometry.
+ *
+ * A curve bows only the edges you picked: the bulge fades to nothing at each
+ * edge's own endpoints, and afterwards every edge you did NOT curve is
+ * re-straightened onto the line between its (possibly moved) corners. So
+ * curving four upright edges of a box bows those four lines while the bottom
+ * rails stay dead straight, only changing length to keep up.
  */
 export function applyEdgeMods(
   geo: THREE.BufferGeometry,
@@ -233,6 +237,23 @@ export function applyEdgeMods(
   const reach = Math.max(0.25, Math.max(size.x, size.y, size.z) * 0.75);
 
   const pos = geo.getAttribute("position") as THREE.BufferAttribute;
+
+  // Original positions, so "which edge is this vertex on" stays stable while
+  // we push vertices around.
+  const orig = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    orig[i * 3] = pos.getX(i);
+    orig[i * 3 + 1] = pos.getY(i);
+    orig[i * 3 + 2] = pos.getZ(i);
+  }
+  const byPos = new Map<string, number[]>();
+  for (let i = 0; i < pos.count; i++) {
+    const k = keyOf(orig[i * 3]!, orig[i * 3 + 1]!, orig[i * 3 + 2]!);
+    const list = byPos.get(k);
+    if (list) list.push(i);
+    else byPos.set(k, [i]);
+  }
+
   const v = new THREE.Vector3();
   const rel = new THREE.Vector3();
   const perp = new THREE.Vector3();
@@ -245,19 +266,47 @@ export function applyEdgeMods(
     const half = Math.max(1e-3, e.length / 2);
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
-      rel.copy(v).sub(e.mid);
+      rel.set(orig[i * 3]!, orig[i * 3 + 1]!, orig[i * 3 + 2]!).sub(e.mid);
       const along = rel.dot(e.dir);
       perp.copy(rel).addScaledVector(e.dir, -along);
       const d = perp.length();
       const w = smooth(1 - d / reach);
       if (w <= 0) continue;
+      // Along the edge: full effect at the middle, nothing at the ends, so
+      // the neighbouring perpendicular edges keep their corners.
+      const t = THREE.MathUtils.clamp(along / half, -1, 1);
+      const wAlong = e.loop ? 1 : Math.max(0, 1 - t * t);
       disp.set(0, 0, 0);
-      if (m.curve) disp.addScaledVector(e.out, m.curve * w);
-      if (tan) {
-        const t = THREE.MathUtils.clamp(along / half, -1, 1);
-        disp.addScaledVector(e.out, tan * t * half * w);
-      }
+      if (m.curve) disp.addScaledVector(e.out, m.curve * w * wAlong);
+      if (tan) disp.addScaledVector(e.out, tan * t * half * w);
       pos.setXYZ(i, v.x + disp.x, v.y + disp.y, v.z + disp.z);
+    }
+  }
+
+  // Re-straighten untouched edges: they may have shifted, but they must never
+  // pick up curvature the user didn't ask for.
+  const curved = new Set(active.filter((m) => m.curve).map((m) => m.i));
+  if (curved.size) {
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    for (const e of edges) {
+      if (curved.has(e.index) || e.loop || e.points.length < 3) continue;
+      const first = e.points[0]!;
+      const last = e.points[e.points.length - 1]!;
+      const span = last.distanceTo(first);
+      if (span < 1e-6) continue;
+      const idxA = byPos.get(keyOf(first.x, first.y, first.z));
+      const idxB = byPos.get(keyOf(last.x, last.y, last.z));
+      if (!idxA?.length || !idxB?.length) continue;
+      a.fromBufferAttribute(pos, idxA[0]!);
+      b.fromBufferAttribute(pos, idxB[0]!);
+      for (const p of e.points) {
+        const idx = byPos.get(keyOf(p.x, p.y, p.z));
+        if (!idx?.length) continue;
+        const t = p.distanceTo(first) / span;
+        v.copy(a).lerp(b, THREE.MathUtils.clamp(t, 0, 1));
+        for (const i of idx) pos.setXYZ(i, v.x, v.y, v.z);
+      }
     }
   }
 
