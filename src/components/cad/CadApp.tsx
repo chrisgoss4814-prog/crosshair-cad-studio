@@ -1550,6 +1550,8 @@ export function CadApp() {
         }
         return next;
       });
+    };
+
     return { inc, dec, edges, modOf, bumpEdge };
   };
 
