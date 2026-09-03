@@ -2708,12 +2708,8 @@ export function CadApp() {
         </div>
       )}
 
-      {/* Shapes: sizing controls ride the top edge so the view stays clear */}
-      {cat === "place" && !clearHud && (
-        <div className="pointer-events-auto absolute inset-x-0 top-11 z-40 overflow-x-auto border-b border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
-          {shapesTopStrip()}
-        </div>
-      )}
+
+
 
       {/* Alignment readout — sits just under the top edge strip */}
       {alignedAxes.length > 0 && !clearHud && (
