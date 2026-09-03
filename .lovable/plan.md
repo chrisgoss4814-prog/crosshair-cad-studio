@@ -58,9 +58,18 @@ A single **Advanced** button reveals, only for the armed/selected shape:
 
 `curve` corner-rounding, `bend`, `taper`, and `bend axis` are **deleted** from the app entirely — removed from the object model, geometry builder, and UI.
 
-## 8. Kept as-is
+## 8. The 3D space
+
+- **Open space below the ground.** The solid 600×600 floor plane at Y=0 is removed, so you can fly below the X/Z surface and look back up. Objects under the ground are fully visible.
+- **Ground stays a line grid.** The same lined grid remains as the ground reference, drawn double-sided so it reads from underneath too, and fading with distance instead of ending at a hard edge.
+- **Ruler overlay removed.** The screen-locked X/Y/Z lines with scrolling numbers are deleted. In their place, a single small coordinate readout (`X / Y / Z` of the placement point) sits in a corner of the screen.
+- The three coloured world axis lines through the origin stay, and the Y line extends well below zero so you keep your bearings underground.
+- Taps on empty space (deselect, measure picks, tap-target) still work: an invisible pick plane replaces the visible floor, so nothing about selection or placement changes.
+
+## 9. Kept as-is
 
 Add / Place-here button, Repeat, recent-shape quick bar, Confirm toggle, snapping, collision, and the screen-centre ghost are unchanged. The same edge strip is reused when an already-placed object is selected, so building and editing use identical controls.
+
 
 ## Technical notes
 
