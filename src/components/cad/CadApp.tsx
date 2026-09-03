@@ -2768,7 +2768,7 @@ export function CadApp() {
           </div>
         )}
 
-        {focused && collapsed && (
+        {focused && cat !== "place" && collapsed && (
           <button
             type="button"
             onClick={() => setCollapsed(false)}
