@@ -2607,10 +2607,25 @@ export function CadApp() {
       {/* Compact coordinate readout — replaces the old ruler overlay */}
       {!clearHud && <CoordChip />}
 
-      {/* Top bar — hidden while a toolbar strip is open or the screen is clear */}
-      {!focused && !clearHud && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-2 p-3">
-          <div className="pointer-events-auto flex gap-1.5">
+      {/* Top edge: one compact scrollable strip — categories first, then view/quick toggles.
+          Always visible (unless the screen is cleared) so it never floats over the scene. */}
+      {!clearHud && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex flex-col gap-1 p-1.5">
+          <div className="pointer-events-auto flex w-full gap-1 overflow-x-auto rounded-lg border border-grid-line bg-panel/80 px-1.5 py-1 backdrop-blur-md">
+            {CATS.map((c) => (
+              <Chip
+                key={c.id}
+                active={cat === c.id}
+                onClick={() => openCat(c.id)}
+                hint={CAT_HELP[c.id] ?? "step"}
+              >
+                {c.label}
+              </Chip>
+            ))}
+            <Chip active={guideOpen} onClick={() => setGuideOpen(true)}>
+              ? Guide
+            </Chip>
+            <span className="mx-0.5 w-px shrink-0 self-stretch bg-grid-line" />
             {VIEWS.map((v) => (
               <Chip
                 key={v.id}
@@ -2621,8 +2636,6 @@ export function CadApp() {
                 {v.label}
               </Chip>
             ))}
-          </div>
-          <div className="pointer-events-auto flex gap-1.5">
             <Chip
               active={precision}
               onClick={() => setPrecision((p) => !p)}
