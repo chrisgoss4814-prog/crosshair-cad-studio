@@ -1527,7 +1527,9 @@ export function CadApp() {
       setEdgeMods((prev) => {
         const next = [...prev];
         const targets = new Set(selEdges);
-        if (mirrorEdges) {
+        // Curving only ever touches the edges you picked — mirroring would
+        // bend lines you never selected.
+        if (mirrorEdges && field !== "curve") {
           // Mirror onto the opposite parallel edge so boxes stay square.
           for (const i of selEdges) {
             const e = edges[i];
