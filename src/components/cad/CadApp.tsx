@@ -2755,22 +2755,6 @@ export function CadApp() {
           </div>
         )}
 
-        {/* Category bar */}
-        <div className="pointer-events-auto mx-auto flex w-full max-w-[520px] gap-1.5 overflow-x-auto rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
-          {CATS.map((c) => (
-            <Chip
-              key={c.id}
-              active={cat === c.id}
-              onClick={() => openCat(c.id)}
-              hint={CAT_HELP[c.id] ?? "step"}
-            >
-              {c.label}
-            </Chip>
-          ))}
-          <Chip active={guideOpen} onClick={() => setGuideOpen(true)}>
-            ? Guide
-          </Chip>
-        </div>
 
         {/* Sticks — gesture mode keeps only the pivot-in-place Look stick */}
         {view === "fly" && sticks && (!focused || collapsed) && (
