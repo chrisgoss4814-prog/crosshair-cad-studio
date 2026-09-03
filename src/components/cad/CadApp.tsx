@@ -2607,10 +2607,25 @@ export function CadApp() {
       {/* Compact coordinate readout — replaces the old ruler overlay */}
       {!clearHud && <CoordChip />}
 
-      {/* Top bar — hidden while a toolbar strip is open or the screen is clear */}
-      {!focused && !clearHud && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-2 p-3">
-          <div className="pointer-events-auto flex gap-1.5">
+      {/* Top edge: one compact scrollable strip — categories first, then view/quick toggles.
+          Always visible (unless the screen is cleared) so it never floats over the scene. */}
+      {!clearHud && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex flex-col gap-1 p-1.5">
+          <div className="pointer-events-auto flex w-full gap-1 overflow-x-auto rounded-lg border border-grid-line bg-panel/80 px-1.5 py-1 backdrop-blur-md">
+            {CATS.map((c) => (
+              <Chip
+                key={c.id}
+                active={cat === c.id}
+                onClick={() => openCat(c.id)}
+                hint={CAT_HELP[c.id] ?? "step"}
+              >
+                {c.label}
+              </Chip>
+            ))}
+            <Chip active={guideOpen} onClick={() => setGuideOpen(true)}>
+              ? Guide
+            </Chip>
+            <span className="mx-0.5 w-px shrink-0 self-stretch bg-grid-line" />
             {VIEWS.map((v) => (
               <Chip
                 key={v.id}
@@ -2621,8 +2636,6 @@ export function CadApp() {
                 {v.label}
               </Chip>
             ))}
-          </div>
-          <div className="pointer-events-auto flex gap-1.5">
             <Chip
               active={precision}
               onClick={() => setPrecision((p) => !p)}
@@ -2647,9 +2660,9 @@ export function CadApp() {
         </div>
       )}
 
-      {/* Alignment readout */}
+      {/* Alignment readout — sits just under the top edge strip */}
       {alignedAxes.length > 0 && !clearHud && (
-        <div className="pointer-events-none absolute left-1/2 top-3 z-40 -translate-x-1/2 rounded-md border border-axis-y/60 bg-panel/85 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-axis-y backdrop-blur-md">
+        <div className="pointer-events-none absolute left-1/2 top-14 z-40 -translate-x-1/2 rounded-md border border-axis-y/60 bg-panel/85 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-axis-y backdrop-blur-md">
           aligned on {alignedAxes.join(" · ")}
         </div>
       )}
@@ -2742,22 +2755,6 @@ export function CadApp() {
           </div>
         )}
 
-        {/* Category bar */}
-        <div className="pointer-events-auto mx-auto flex w-full max-w-[520px] gap-1.5 overflow-x-auto rounded-lg border border-grid-line bg-panel/85 px-2 py-1.5 backdrop-blur-md">
-          {CATS.map((c) => (
-            <Chip
-              key={c.id}
-              active={cat === c.id}
-              onClick={() => openCat(c.id)}
-              hint={CAT_HELP[c.id] ?? "step"}
-            >
-              {c.label}
-            </Chip>
-          ))}
-          <Chip active={guideOpen} onClick={() => setGuideOpen(true)}>
-            ? Guide
-          </Chip>
-        </div>
 
         {/* Sticks — gesture mode keeps only the pivot-in-place Look stick */}
         {view === "fly" && sticks && (!focused || collapsed) && (
@@ -2947,7 +2944,7 @@ function CoordChip() {
     return () => cancelAnimationFrame(raf);
   }, []);
   return (
-    <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 -translate-x-1/2 rounded-md border border-grid-line bg-panel/80 px-2 py-0.5 font-mono text-[10px] backdrop-blur-md">
+    <div className="pointer-events-none absolute right-1 top-14 z-30 rounded-md border border-grid-line bg-panel/80 px-2 py-0.5 font-mono text-[10px] backdrop-blur-md">
       <span className="text-axis-x">x {p[0].toFixed(2)}</span>
       <span className="text-axis-y"> · y {p[1].toFixed(2)}</span>
       <span className="text-axis-z"> · z {p[2].toFixed(2)}</span>
