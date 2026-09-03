@@ -128,7 +128,7 @@ type Cat =
 
 const CATS: { id: Cat; label: string; tool: ToolMode | null }[] = [
   { id: "move", label: "Move", tool: null },
-  { id: "place", label: "Place", tool: "place" },
+  { id: "place", label: "Shapes", tool: "place" },
   { id: "line", label: "Line", tool: "line" },
   { id: "edit", label: "Edit", tool: "edit" },
   { id: "stretch", label: "Size", tool: "edit" },
@@ -2601,9 +2601,15 @@ export function CadApp() {
         </div>
       )}
 
+      {/* Shape picker rides at the top whenever the Shapes tool is open */}
+      {cat === "place" && !clearHud && <ShapeBar kind={kind} onPick={setKind} />}
+
+      {/* Compact coordinate readout — replaces the old ruler overlay */}
+      {!clearHud && <CoordChip />}
+
       {/* Top bar — hidden while a toolbar strip is open or the screen is clear */}
       {!focused && !clearHud && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-2 p-3">
           <div className="pointer-events-auto flex gap-1.5">
             {VIEWS.map((v) => (
               <Chip
@@ -2918,5 +2924,33 @@ export function CadApp() {
       )}
     </main>
     </HintCtx.Provider>
+  );
+}
+
+/** Live world position of the screen-centre cursor, in one small chip. */
+function CoordChip() {
+  const [p, setP] = useState<[number, number, number]>([0, 0, 0]);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      setP((prev) => {
+        const n: [number, number, number] = [
+          +centerPoint.x.toFixed(2),
+          +centerPoint.y.toFixed(2),
+          +centerPoint.z.toFixed(2),
+        ];
+        return n[0] === prev[0] && n[1] === prev[1] && n[2] === prev[2] ? prev : n;
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 -translate-x-1/2 rounded-md border border-grid-line bg-panel/80 px-2 py-0.5 font-mono text-[10px] backdrop-blur-md">
+      <span className="text-axis-x">x {p[0].toFixed(2)}</span>
+      <span className="text-axis-y"> · y {p[1].toFixed(2)}</span>
+      <span className="text-axis-z"> · z {p[2].toFixed(2)}</span>
+    </div>
   );
 }
