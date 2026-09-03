@@ -1,62 +1,73 @@
-# Shapes tool: icon picker + edge-length editing
+# Shapes tool: icon picker + per-edge editing
 
 ## 1. Rename
 
-"Place" becomes **Shapes** everywhere in the toolbar and help text.
+"Place" becomes **Shapes** everywhere (toolbar label, help text). The `place` id is kept so saved prefs still match.
 
 ## 2. Shape icons at the top of the screen
 
-The text chips move out of the bottom strip and become a shape bar pinned at the top:
+The text chips leave the bottom strip and become an icon bar pinned at the top:
 
-- Row 1: **3D** — box, sphere, cylinder, cone, prism, torus, wedge, etc.
-- Row 2: **2D** — rectangle, circle, ellipse, polygon, star, triangle, arc.
-- Each shape is a small drawn icon (real outline of the shape, not a letter), tap to arm it. The active shape lights up.
-- Rows are horizontally scrollable, labelled `3D` and `2D` on the left, and only appear while the Shapes tool is open. In Clear mode they hide with the rest of the HUD.
+- Row 1 — **3D**: box, sphere, cylinder, cone, prism, torus, wedge, …
+- Row 2 — **2D**: rectangle, circle, ellipse, polygon, star, triangle, arc, …
+- Each entry is a drawn outline icon of the real shape (not a letter). Tap to arm it; the active shape lights up.
+- Rows are horizontally scrollable, labelled `3D` / `2D` on the left, and show only while the Shapes tool is open. They hide in Clear mode.
 
-## 3. No sliders — edge lengths with steppers
+## 3. Increment control: digit × decimal place
 
-The size sliders are removed. Instead the strip lists the **edges of the shape you have selected**, each with its own value you can change:
-
-```text
-edge          value        controls
-width  X      1.000 m      [ − ] [ 1.000 ] [ + ]
-depth  Z      1.000 m      [ − ] [ 1.000 ] [ + ]
-height Y      1.000 m      [ − ] [ 1.000 ] [ + ]
-```
-
-- Each row is a large −/+ pair around the number; one tap moves exactly one increment.
-- The number itself is tappable to type an exact value.
-- A **Link** toggle makes all edges move together (uniform), off by default.
-- Edge names follow the shape: a cylinder shows `radius` and `height`, a cone shows `base radius` and `height`, a rectangle shows `width` and `length`, a polygon shows `edge length` and `sides`.
-- The same edge rows appear for an already-placed object when it is selected, so editing a built object uses the identical control.
-
-## 4. Increment control: digit + decimal place
-
-One shared increment picker replaces the old step chips:
+One shared increment picker replaces the old step chips and applies to every stepper in the strip (edge length, extrude, rotation, angle):
 
 ```text
 increment   [1][2][3][4][5][6][7][8][9]   ×  [10] [1] [0.1] [0.01] [0.001]
                      ^ digit                        ^ decimal place
 ```
 
-The active increment is `digit × place` (e.g. `3 × 0.01 = 0.03`) and is shown live next to the −/+ buttons. It applies to every stepper in the open strip — edge lengths, extrude, rotation and drag increment.
+The active increment is `digit × place` (e.g. `3 × 0.01 = 0.03`), shown live next to every −/+. Persisted with the existing control prefs.
 
-## 5. Options: only what applies
+## 4. No sliders — edge editing is the core
 
-The always-on rows for sides, curve, bend, taper and bend axis are removed from the main strip.
+The shape's **edges** are the editable unit. After a shape is chosen (or an object selected), the strip becomes an edge editor:
 
-- **Sides** shows only for polygon/prism/star shapes, as a −/+ row.
-- **Extrude** shows only for 2D shapes (turns a flat profile into a solid).
-- **Curve, bend, taper, bend axis** move behind a single **Advanced** button in the strip; opening it shows them as the same −/+ stepper rows, never as sliders.
+- The selected edge's **length** is a large −/+ stepper (one tap = one increment) with a tappable number for exact entry.
+- Edges highlight on the 3D ghost/object; the highlighted edge is bright, the rest dim.
+- **Swipe sideways** to move the highlight to the next edge; it cycles through every edge and repeats.
+- **Multi-select**: tap a "select more" control (or two-finger tap edges) to grab several edges at once. The length stepper then edits all of them together; curving also applies to all of them.
+- Editing one edge may indirectly move neighbouring edges (that is expected and fine).
+- A **Link** toggle locks all edges to move together (uniform scale), off by default.
 
-## 6. Kept as-is
+## 5. Curve a line
 
-Add / Place-here button, Repeat, recent-shape quick bar, Confirm toggle, snapping and collision behaviour, and the ghost at screen centre are unchanged.
+- A **Curve** toggle on the selected edge(s) turns a straight edge into an arc/bezier.
+- −/+ steppers (same increment) set the curve amount; dragging the edge also bends it.
+- **Mirror mode**: when several **parallel** edges are selected (e.g. the four vertical edges of a box), curving one curves the others in directions that mirror across the shape — front/back bow opposite ways, left/right opposite ways — so the result stays symmetric instead of all bowing the same way.
+
+## 6. Angle of a line
+
+- The selected edge's angle can be set by **typing a number**, or by picking a **set angle** chip: `0° 15° 30° 45° 60° 75° 90°`.
+- Same −/+ steppers and decimal increment work here too.
+
+## 7. Advanced (appears after a shape is chosen)
+
+A single **Advanced** button reveals, only for the armed/selected shape:
+
+- **2D ⇄ 3D toggle** — flip a flat profile into a solid (or back). For 2D shapes this is the extrude on/off switch.
+- **Extrude** height — −/+ stepper + typed value (only meaningful for 2D→3D).
+- **Change shape** — a compact picker to morph the current object into a different shape while keeping its position/edges where possible.
+- **Rotation** — X/Y/Z rotation as −/+ steppers with the shared increment.
+- Sides (polygon/prism/star only) stays as a −/+ row here, not in the main strip.
+
+`curve` corner-rounding, `bend`, `taper`, and `bend axis` are **deleted** from the app entirely — removed from the object model, geometry builder, and UI.
+
+## 8. Kept as-is
+
+Add / Place-here button, Repeat, recent-shape quick bar, Confirm toggle, snapping, collision, and the screen-centre ghost are unchanged. The same edge strip is reused when an already-placed object is selected, so building and editing use identical controls.
 
 ## Technical notes
 
-- New `ShapeBar` component rendered above the canvas HUD, driven by `SHAPES_3D` / `SHAPES_2D` from `geometry.ts`; icons are inline SVG outlines keyed by `ShapeKind`.
-- New `Stepper` component (label, value, −/+, tap-to-type) replaces `NumRow`/`Slider` usage inside the Shapes strip.
-- New `increment` state = `digit * place`, persisted with the existing control prefs (`vb.controls.v1`); `STEPS` in `state.ts` stays for backwards compatibility with saved prefs.
-- An `edgesFor(kind)` descriptor maps each `ShapeKind` to its named editable dimensions and which of them bind to `scale[0..2]`, `sides`, or `extrude`, so one strip serves both placement and selected-object editing.
-- `CATS` entry `place` keeps its id (saved prefs unaffected) and only its label changes to `Shapes`.
+- `ShapeBar` (top HUD): inline SVG outline icons keyed by `ShapeKind`, driven by `SHAPES_3D` / `SHAPES_2D`.
+- `Stepper` component (label, value, −/+, tap-to-type) replaces `NumRow`/`Slider` in the Shapes strip.
+- `increment` state = `digit * place`, persisted in `vb.controls.v1`; `STEPS` kept for old saved prefs.
+- **Edge model**: `PlacedObject` gains an `edges` descriptor — an ordered list of `{ a: vertIndex, b: vertIndex, length, curve, angle }` derived from the base shape's topology. `geometry.ts` grows an `edgesFor(kind, dims, sides)` function returning the ordered edge list and vertex positions; the mesh builder consumes those edges so per-edge length/curve/angle changes rebuild the geometry.
+- Edge highlight + swipe cycling + multi-select is pure UI state in `CadApp.tsx` (`selectedEdge`, `selectedEdges`).
+- **Mirror curve**: when applying a curve to a multi-selection of parallel edges, the sign of the curve is flipped per edge based on its outward face normal, so opposite edges bow oppositely.
+- Remove `bend`, `taper`, `bendAxis`, and corner `curve` from `GeometrySpec`, `specOf`, `buildGeometry`, `PlacedObject`, and the AI builder tool schema. Existing saved scenes with those fields hydrate to ignored values.
