@@ -770,6 +770,19 @@ export function CadApp() {
     [selectedIds],
   );
 
+  /**
+   * Taper scales every horizontal slice of the shape: the outline stays the
+   * same (square stays square, circle stays circle) and only its size changes
+   * from bottom to top. Applies to the centred ghost and to any selection.
+   */
+  const bumpTaper = (d: number) => {
+    setTaper((v) => {
+      const next = +Math.max(-1, Math.min(1, v + d)).toFixed(4);
+      updateSelected((o) => ({ ...o, taper: next }));
+      return next;
+    });
+  };
+
   const clearTap = () => {
     tapTarget.point = null;
     tapTarget.normal = null;
