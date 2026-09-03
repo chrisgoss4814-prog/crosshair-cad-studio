@@ -28,6 +28,8 @@ import {
 import {
   alignmentsFor,
   centerPoint,
+  placePoint,
+  ghostYaw,
   centroid,
   cloneObject,
   controls,
