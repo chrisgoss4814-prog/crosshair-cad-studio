@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { Brush, Evaluator, SUBTRACTION, INTERSECTION, ADDITION } from "three-bvh-csg";
+import { applyEdgeMods, edgeModsKey, extractEdges, type EdgeInfo, type EdgeMod } from "./edges";
+
+export type { EdgeInfo, EdgeMod } from "./edges";
 
 // ---------------------------------------------------------------------------
 // Shape catalog
@@ -138,18 +141,17 @@ export function profileShape(kind: Shape2D, sides = 6, curve = 0): THREE.Shape {
 function baseGeometry(
   kind: ShapeKind,
   sides: number,
-  curve: number,
   extrude: number,
   profile: Shape2D | null,
 ): THREE.BufferGeometry {
   // A profile applied to a solid rebuilds it as an extrusion of that outline,
   // so the end face takes the profile and the side faces re-loft to match.
   if (profile && !is2D(kind)) {
-    return extrudedProfile(profile, sides, curve, 1);
+    return extrudedProfile(profile, sides, 1);
   }
 
   if (is2D(kind)) {
-    const shape = profileShape(kind, sides, curve);
+    const shape = profileShape(kind, sides);
     if (extrude > 0) return extrudedFromShape(shape, extrude);
     const g = new THREE.ShapeGeometry(shape, 32);
     g.rotateX(-Math.PI / 2);
@@ -191,7 +193,7 @@ function baseGeometry(
       return new THREE.DodecahedronGeometry(0.6);
     case "box":
     default:
-      return new THREE.BoxGeometry(1, 1, 1);
+      return new THREE.BoxGeometry(1, 1, 1, 8, 8, 8);
   }
 }
 
@@ -206,74 +208,13 @@ function extrudedFromShape(shape: THREE.Shape, depth: number) {
   return g;
 }
 
-function extrudedProfile(kind: Shape2D, sides: number, curve: number, depth: number) {
-  return extrudedFromShape(profileShape(kind, sides, curve), depth);
+function extrudedProfile(kind: Shape2D, sides: number, depth: number) {
+  return extrudedFromShape(profileShape(kind, sides), depth);
 }
 
 // ---------------------------------------------------------------------------
 // Deformers
 // ---------------------------------------------------------------------------
-
-/** Bend around the given axis by `angle` radians across the object's height. */
-export function applyBend(
-  geo: THREE.BufferGeometry,
-  angle: number,
-  axis: 0 | 1 | 2,
-) {
-  if (!angle) return geo;
-  geo.computeBoundingBox();
-  const bb = geo.boundingBox!;
-  const size = new THREE.Vector3();
-  bb.getSize(size);
-  const along = axis === 1 ? size.y : axis === 0 ? size.x : size.z;
-  if (along < 1e-6) return geo;
-  const radius = along / angle;
-  const pos = geo.attributes["position"] as THREE.BufferAttribute;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i);
-    // t = normalised position along the bend axis, centered
-    const t = (axis === 1 ? v.y : axis === 0 ? v.x : v.z) / along;
-    const theta = t * angle;
-    if (axis === 1) {
-      const r = radius - v.x;
-      v.x = radius - r * Math.cos(theta);
-      v.y = r * Math.sin(theta);
-    } else if (axis === 0) {
-      const r = radius - v.y;
-      v.y = radius - r * Math.cos(theta);
-      v.x = r * Math.sin(theta);
-    } else {
-      const r = radius - v.y;
-      v.y = radius - r * Math.cos(theta);
-      v.z = r * Math.sin(theta);
-    }
-    pos.setXYZ(i, v.x, v.y, v.z);
-  }
-  pos.needsUpdate = true;
-  geo.computeVertexNormals();
-  return geo;
-}
-
-/** Taper: 0 = no change, 1 = pinched to a point at the top. */
-export function applyTaper(geo: THREE.BufferGeometry, taper: number) {
-  if (!taper) return geo;
-  geo.computeBoundingBox();
-  const bb = geo.boundingBox!;
-  const h = bb.max.y - bb.min.y;
-  if (h < 1e-6) return geo;
-  const pos = geo.attributes["position"] as THREE.BufferAttribute;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    v.fromBufferAttribute(pos, i);
-    const t = (v.y - bb.min.y) / h;
-    const k = 1 - taper * t;
-    pos.setXYZ(i, v.x * k, v.y, v.z * k);
-  }
-  pos.needsUpdate = true;
-  geo.computeVertexNormals();
-  return geo;
-}
 
 // ---------------------------------------------------------------------------
 // Booleans
@@ -349,12 +290,10 @@ export function evaluateBoolean(
 export type GeometrySpec = {
   kind: ShapeKind;
   sides: number;
-  curve: number;
   extrude: number;
-  bend: number;
-  bendAxis: 0 | 1 | 2;
-  taper: number;
   profile: Shape2D | null;
+  /** Per-edge curve / angle tweaks applied to the unit geometry. */
+  edges: EdgeMod[];
 };
 
 const cache = new Map<string, THREE.BufferGeometry>();
@@ -363,12 +302,9 @@ export function specKey(s: GeometrySpec) {
   return [
     s.kind,
     s.sides,
-    s.curve,
     s.extrude,
-    s.bend,
-    s.bendAxis,
-    s.taper,
     s.profile ?? "-",
+    edgeModsKey(s.edges ?? []),
   ].join("|");
 }
 
@@ -377,12 +313,29 @@ export function buildGeometry(spec: GeometrySpec): THREE.BufferGeometry {
   const hit = cache.get(key);
   if (hit) return hit;
 
-  let geo = baseGeometry(spec.kind, spec.sides, spec.curve, spec.extrude, spec.profile);
-  if (spec.taper) geo = applyTaper(geo, spec.taper);
-  if (spec.bend) geo = applyBend(geo, spec.bend, spec.bendAxis);
+  let geo = baseGeometry(spec.kind, spec.sides, spec.extrude, spec.profile);
+  const mods = spec.edges ?? [];
+  if (mods.some((m) => m.curve || m.angle)) {
+    geo = applyEdgeMods(geo.clone(), edgesOf(spec), mods);
+  }
   geo.computeBoundingBox();
 
   if (cache.size > 240) cache.clear();
   cache.set(key, geo);
   return geo;
+}
+
+const edgeCache = new Map<string, EdgeInfo[]>();
+
+/** Ordered edge list for a spec's *base* shape (ignoring edge mods). */
+export function edgesOf(spec: GeometrySpec): EdgeInfo[] {
+  const key = [spec.kind, spec.sides, spec.extrude, spec.profile ?? "-"].join("|");
+  const hit = edgeCache.get(key);
+  if (hit) return hit;
+  const list = extractEdges(
+    baseGeometry(spec.kind, spec.sides, spec.extrude, spec.profile),
+  );
+  if (edgeCache.size > 120) edgeCache.clear();
+  edgeCache.set(key, list);
+  return list;
 }
