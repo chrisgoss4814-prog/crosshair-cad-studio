@@ -285,12 +285,13 @@ export function applyEdgeMods(
 
   // Re-straighten untouched edges: they may have shifted, but they must never
   // pick up curvature the user didn't ask for.
-  const curved = new Set(active.filter((m) => m.curve).map((m) => m.i));
-  if (curved.size) {
+  const touched = new Set(active.map((m) => m.i));
+  {
     const a = new THREE.Vector3();
     const b = new THREE.Vector3();
     for (const e of edges) {
-      if (curved.has(e.index) || e.loop || e.points.length < 3) continue;
+      if (touched.has(e.index) || e.loop || e.points.length < 2) continue;
+
       const first = e.points[0]!;
       const last = e.points[e.points.length - 1]!;
       const span = last.distanceTo(first);
