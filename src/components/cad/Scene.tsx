@@ -419,7 +419,9 @@ function Ghost({
   // get a translucent double-sided face plus a bright outline instead.
   const flat = is2D(spec.kind) && !(spec.extrude > 0);
   useFrame(() => {
-    ref.current?.position.copy(centerPoint);
+    if (!ref.current) return;
+    ref.current.position.copy(centerPoint);
+    ref.current.rotation.y = ghostYaw.value;
   });
   const ghostMat = useMemo(
     () =>
