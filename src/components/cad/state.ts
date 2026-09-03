@@ -4,12 +4,14 @@ import {
   evaluateBoolean,
   is2D,
   type BooleanOp,
+  type EdgeMod,
   type GeometrySpec,
   type Shape2D,
   type ShapeKind,
 } from "./geometry";
 
-export type { ShapeKind, Shape2D } from "./geometry";
+export type { ShapeKind, Shape2D, EdgeMod, EdgeInfo } from "./geometry";
+export { edgesOf } from "./geometry";
 export { is2D, SHAPES_2D, SHAPES_3D } from "./geometry";
 
 export type ViewMode = "fly" | "orbit" | "top";
@@ -28,7 +30,6 @@ export type CutOp = {
   op: BooleanOp;
   kind: ShapeKind;
   sides: number;
-  curve: number;
   extrude: number;
   position: [number, number, number];
   rotation: [number, number, number];
@@ -71,12 +72,10 @@ export type PlacedObject = {
   /** Legacy uniform size, kept for older saved scenes. */
   size: number;
   sides: number;
-  curve: number;
   /** Extrude height for 2D profiles; 0 keeps them flat. */
   extrude: number;
-  bend: number;
-  bendAxis: 0 | 1 | 2;
-  taper: number;
+  /** Per-edge length/curve/angle tweaks. */
+  edges: EdgeMod[];
   profile: Shape2D | null;
   ops: CutOp[];
   motion: MotionSpec | null;
@@ -422,11 +421,8 @@ export function makeObject(
     scale: [size, size, size],
     size,
     sides: 6,
-    curve: 0,
     extrude: is2D(kind) ? 0 : 0,
-    bend: 0,
-    bendAxis: 1,
-    taper: 0,
+    edges: [],
     profile: null,
     ops: [],
     motion: null,
@@ -449,11 +445,8 @@ export function hydrateObject(o: Partial<PlacedObject> & { id: string }): Placed
     scale: [size, size, size],
     size,
     sides: 6,
-    curve: 0,
     extrude: 0,
-    bend: 0,
-    bendAxis: 1,
-    taper: 0,
+    edges: [],
     profile: null,
     ops: [],
     motion: null,
@@ -470,11 +463,8 @@ export function specOf(o: PlacedObject): GeometrySpec {
   return {
     kind: o.kind,
     sides: o.sides ?? 6,
-    curve: o.curve ?? 0,
     extrude: o.extrude ?? 0,
-    bend: o.bend ?? 0,
-    bendAxis: o.bendAxis ?? 1,
-    taper: o.taper ?? 0,
+    edges: o.edges ?? [],
     profile: o.profile ?? null,
   };
 }
@@ -508,11 +498,8 @@ export function geometryOf(o: PlacedObject): THREE.BufferGeometry {
     const toolGeo = buildGeometry({
       kind: op.kind,
       sides: op.sides,
-      curve: op.curve,
       extrude: op.extrude,
-      bend: 0,
-      bendAxis: 1,
-      taper: 0,
+      edges: [],
       profile: null,
     });
     const next = evaluateBoolean(

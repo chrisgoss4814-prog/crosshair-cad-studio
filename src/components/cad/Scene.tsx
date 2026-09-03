@@ -953,22 +953,24 @@ export function Scene(props: SceneProps) {
         sectionSize={5}
         sectionThickness={1}
         sectionColor="#38506e"
-        fadeDistance={110}
-        fadeStrength={1.4}
+        fadeDistance={140}
+        fadeStrength={1.2}
         infiniteGrid
         followCamera={false}
+        side={THREE.DoubleSide}
       />
 
       {/* World orientation axes */}
       <Line points={[[-200, 0, 0], [200, 0, 0]]} color="#ff6b6b" lineWidth={1} transparent opacity={0.55} />
-      <Line points={[[0, -60, 0], [0, 200, 0]]} color="#8ce99a" lineWidth={1} transparent opacity={0.55} />
+      <Line points={[[0, -200, 0], [0, 200, 0]]} color="#8ce99a" lineWidth={1} transparent opacity={0.55} />
       <Line points={[[0, 0, -200], [0, 0, 200]]} color="#4fd1ff" lineWidth={1} transparent opacity={0.55} />
 
-      {/* Ground catcher for deselect / measure / tap-target picks */}
+      {/* Invisible ground catcher for deselect / measure / tap-target picks —
+          the space below Y=0 stays fully open and visible. */}
       <mesh
+        visible={false}
         rotation-x={-Math.PI / 2}
         position={[0, 0, 0]}
-        receiveShadow
         onPointerDown={(e) => {
           if (tool === "measure") {
             e.stopPropagation();
@@ -985,13 +987,7 @@ export function Scene(props: SceneProps) {
         }}
       >
         <planeGeometry args={[600, 600]} />
-        <meshStandardMaterial
-          color="#111a27"
-          roughness={0.95}
-          metalness={0.05}
-          transparent
-          opacity={0.85}
-        />
+        <meshBasicMaterial visible={false} side={THREE.DoubleSide} />
       </mesh>
 
       {objects.map((o) => (
