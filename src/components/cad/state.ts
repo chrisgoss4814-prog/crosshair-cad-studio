@@ -175,6 +175,10 @@ export const placePoint = new THREE.Vector3();
 /** Camera heading (radians) so the ghost can always face the viewer. */
 export const ghostYaw = { value: 0 };
 
+/** True when the spot under the ghost already holds another object. */
+export const ghostBlocked = { value: false };
+
+
 /** Sticky tap target — when set, placement uses this instead of screen center. */
 export const tapTarget: {
   point: THREE.Vector3 | null;
