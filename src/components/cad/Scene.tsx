@@ -367,8 +367,10 @@ function CenterProbe({
     centerPoint.copy(point);
 
     // The ghost turns with the camera so it always presents a face to you.
+    // Quantised to quarter turns so stacks stay square.
     const e = new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ");
-    ghostYaw.value = e.y;
+    const q = Math.PI / 2;
+    ghostYaw.value = Math.round(e.y / q) * q;
 
     // Where it would actually land: flush on the tapped face when one is set.
     let surface = onSurface;
