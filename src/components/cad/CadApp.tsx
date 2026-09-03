@@ -805,7 +805,9 @@ export function CadApp() {
       sides,
       extrude,
       edges: edgeMods,
-      ...(faceHost ? { rotation: [...faceHost.rotation] as [number, number, number] } : {}),
+      rotation: faceHost
+        ? ([...faceHost.rotation] as [number, number, number])
+        : ([0, ghostYaw.value, 0] as [number, number, number]),
     });
     // Face-snapped placements rest on the tapped face and are allowed to pass
     // through other objects in the way; blocking resumes once placed.
