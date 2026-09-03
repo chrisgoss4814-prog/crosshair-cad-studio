@@ -2733,7 +2733,7 @@ export function CadApp() {
                 <Btn onClick={() => setCat(null)}>✕</Btn>
               </div>
             </div>
-            <div className="max-h-[15vh] overflow-x-auto overflow-y-auto">
+            <div className="max-h-[11vh] overflow-x-auto overflow-y-auto">
               <div className="flex w-max items-start gap-3">
                 {shapesTopStrip()}
                 {shapesBottomStrip()}
