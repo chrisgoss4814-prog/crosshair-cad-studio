@@ -1515,6 +1515,286 @@ export function CadApp() {
     </p>
   );
 
+  /** Shared derivations for the Shapes strips. */
+  const shapesCtl = () => {
+    const inc = +(digit * Math.pow(10, -places)).toFixed(6);
+    const dec = (n: number) => n.toFixed(Math.min(3, places + 1));
+    const edges = ghostEdges;
+    const modOf = (i: number) =>
+      edgeMods.find((m) => m.i === i) ?? { i, curve: 0, angle: 0 };
+    const bumpEdge = (field: "curve" | "angle", delta: number) => {
+      if (!selEdges.length) return;
+      setEdgeMods((prev) => {
+        const next = [...prev];
+        const targets = new Set(selEdges);
+        if (mirrorEdges) {
+          // Mirror onto the opposite parallel edge so boxes stay square.
+          for (const i of selEdges) {
+            const e = edges[i];
+            if (!e) continue;
+            edges.forEach((o: (typeof edges)[number], j: number) => {
+              if (j === i) return;
+              if (Math.abs(o.dir.dot(e.dir)) > 0.99 && o.mid.distanceTo(e.mid) > 0.2)
+                targets.add(j);
+            });
+          }
+        }
+        for (const i of targets) {
+          const at = next.findIndex((m) => m.i === i);
+          const base = at >= 0 ? next[at]! : { i, curve: 0, angle: 0 };
+          const upd = { ...base, [field]: +(base[field] + delta).toFixed(4) };
+          if (at >= 0) next[at] = upd;
+          else next.push(upd);
+        }
+        return next;
+      });
+    return { inc, dec, edges, modOf, bumpEdge };
+  };
+
+  /** Shapes controls docked to the top edge: step size + dimensions. */
+  const shapesTopStrip = () => {
+    const { inc, dec } = shapesCtl();
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-mono text-[10px] uppercase text-muted-foreground">
+            step
+          </span>
+          {[1, 2, 5].map((d) => (
+            <Chip key={d} active={digit === d} onClick={() => setDigit(d)}>
+              {d}
+            </Chip>
+          ))}
+          {[0, 1, 2, 3].map((pl) => (
+            <Chip key={pl} active={places === pl} onClick={() => setPlaces(pl)}>
+              {pl === 0 ? "×1" : `×.${"0".repeat(pl - 1)}1`}
+            </Chip>
+          ))}
+          <span className="font-mono text-[10px] text-accent">±{inc}</span>
+        </div>
+        {/* Size: big steppers, tap the number to type an exact value. */}
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {(
+            (lockStretch
+              ? [["size", size, (v: number) => setSize(v)]]
+              : [
+                  [
+                    "x",
+                    stretch[0] ?? 1,
+                    (v: number) =>
+                      setStretch((s) => [v, s[1], s[2]] as [number, number, number]),
+                  ],
+                  [
+                    "y",
+                    stretch[1] ?? 1,
+                    (v: number) =>
+                      setStretch((s) => [s[0], v, s[2]] as [number, number, number]),
+                  ],
+                  [
+                    "z",
+                    stretch[2] ?? 1,
+                    (v: number) =>
+                      setStretch((s) => [s[0], s[1], v] as [number, number, number]),
+                  ],
+                ]) as [string, number, (v: number) => void][]
+          ).map(([label, value, set]) => (
+            <div
+              key={label}
+              className="flex items-center gap-1 rounded-md border border-grid-line bg-panel/70 p-1"
+            >
+              <span className="w-7 font-mono text-[10px] uppercase text-muted-foreground">
+                {label}
+              </span>
+              <Btn onClick={() => set(Math.max(0.001, +(value - inc).toFixed(4)))}>
+                −
+              </Btn>
+              <button
+                type="button"
+                className="min-w-14 rounded bg-panel px-1.5 py-1 font-mono text-xs text-foreground"
+                onClick={() => {
+                  const v = window.prompt(`${label} (m)`, String(value));
+                  const n = Number(v);
+                  if (v !== null && Number.isFinite(n) && n > 0) set(n);
+                }}
+              >
+                {dec(value)}
+              </button>
+              <Btn onClick={() => set(+(value + inc).toFixed(4))}>+</Btn>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  /** Shapes controls docked to the bottom edge: edges, curves, advanced. */
+  const shapesBottomStrip = () => {
+    const { inc, dec, edges, modOf, bumpEdge } = shapesCtl();
+    void edges;
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <Chip active={lockStretch} onClick={() => setLockStretch((l) => !l)}>
+            {lockStretch ? "uniform" : "per-edge"}
+          </Chip>
+          <Chip active={advanced} onClick={() => setAdvanced((a) => !a)}>
+            Advanced
+          </Chip>
+          <Chip
+            active={confirmPlace}
+            onClick={() => {
+              setConfirmPlace((c) => !c);
+              setArmed(false);
+            }}
+          >
+            Confirm {confirmPlace ? "on" : "off"}
+          </Chip>
+        </div>
+        {/* Edge picker — swipe the strip, tap to select one or more edges. */}
+        <div className="mt-1.5">
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="font-mono text-[10px] uppercase text-muted-foreground">
+              edges
+            </span>
+            <Chip active={mirrorEdges} onClick={() => setMirrorEdges((m) => !m)}>
+              Mirror
+            </Chip>
+            <Chip
+              active={false}
+              onClick={() => {
+                setSelEdges([]);
+                setEdgeMods([]);
+              }}
+            >
+              Reset
+            </Chip>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {selEdges.length ? `${selEdges.length} picked` : "tap an edge"}
+            </span>
+          </div>
+          <div className="flex gap-1 overflow-x-auto pb-1">
+            {edges.map((_e: (typeof edges)[number], i: number) => {
+              const m = modOf(i);
+              const on = selEdges.includes(i);
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() =>
+                    setSelEdges((prev) =>
+                      prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
+                    )
+                  }
+                  className={`shrink-0 rounded border px-2 py-1 font-mono text-[10px] ${
+                    on
+                      ? "border-accent bg-accent/20 text-accent"
+                      : "border-grid-line bg-panel/70 text-muted-foreground"
+                  }`}
+                >
+                  e{i + 1}
+                  {m.curve || m.angle ? "•" : ""}
+                </button>
+              );
+            })}
+            {!edges.length && (
+              <span className="font-mono text-[10px] text-muted-foreground">
+                no editable edges on this shape
+              </span>
+            )}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            <div className="flex items-center gap-1 rounded-md border border-grid-line bg-panel/70 p-1">
+              <span className="w-9 font-mono text-[10px] uppercase text-muted-foreground">
+                curve
+              </span>
+              <Btn onClick={() => bumpEdge("curve", -inc)}>−</Btn>
+              <span className="min-w-12 text-center font-mono text-xs">
+                {dec(selEdges.length ? modOf(selEdges[0]!).curve : 0)}
+              </span>
+              <Btn onClick={() => bumpEdge("curve", inc)}>+</Btn>
+            </div>
+            <div className="flex items-center gap-1 rounded-md border border-grid-line bg-panel/70 p-1">
+              <span className="w-9 font-mono text-[10px] uppercase text-muted-foreground">
+                angle
+              </span>
+              <Btn onClick={() => bumpEdge("angle", -1)}>−</Btn>
+              <span className="min-w-12 text-center font-mono text-xs">
+                {(selEdges.length ? modOf(selEdges[0]!).angle : 0).toFixed(1)}°
+              </span>
+              <Btn onClick={() => bumpEdge("angle", 1)}>+</Btn>
+            </div>
+            {[15, 30, 45, 90].map((a) => (
+              <Chip
+                key={a}
+                active={false}
+                onClick={() => {
+                  if (!selEdges.length) return;
+                  bumpEdge("angle", a - modOf(selEdges[0]!).angle);
+                }}
+              >
+                {a}°
+              </Chip>
+            ))}
+          </div>
+        </div>
+        {advanced && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-grid-line pt-1.5">
+            <Chip
+              active={is2D(kind)}
+              onClick={() => setKind(is2D(kind) ? "box" : "rect")}
+            >
+              {is2D(kind) ? "2D" : "3D"}
+            </Chip>
+            {is2D(kind) && (
+              <div className="flex items-center gap-1">
+                <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                  extrude
+                </span>
+                <Btn onClick={() => setExtrude((v) => Math.max(0, +(v - inc).toFixed(4)))}>
+                  −
+                </Btn>
+                <span className="min-w-12 text-center font-mono text-xs">
+                  {dec(extrude)}
+                </span>
+                <Btn onClick={() => setExtrude((v) => +(v + inc).toFixed(4))}>+</Btn>
+              </div>
+            )}
+            <div className="flex items-center gap-1">
+              <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                sides
+              </span>
+              <Btn onClick={() => setSides((v) => Math.max(3, v - 1))}>−</Btn>
+              <span className="min-w-8 text-center font-mono text-xs">{sides}</span>
+              <Btn onClick={() => setSides((v) => Math.min(64, v + 1))}>+</Btn>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                turn
+              </span>
+              {(["X", "Y", "Z"] as const).map((ax, i) => (
+                <Btn
+                  key={ax}
+                  onClick={() =>
+                    updateSelected((o) => {
+                      const r = [...o.rotation] as [number, number, number];
+                      r[i] = r[i]! + THREE.MathUtils.degToRad(rotStep);
+                      return { ...o, rotation: r };
+                    })
+                  }
+                >
+                  {ax}
+                </Btn>
+              ))}
+              <span className="font-mono text-[10px] text-muted-foreground">
+                {rotStep}°
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const stripBody = () => {
     switch (cat) {
       case "line": {
@@ -1755,274 +2035,6 @@ export function CadApp() {
       case "place":
         return null;
 
-      case "__place_unused": {
-        const inc = +(digit * Math.pow(10, -places)).toFixed(6);
-        const dec = (n: number) => n.toFixed(Math.min(3, places + 1));
-        const edges = ghostEdges;
-        const modOf = (i: number) =>
-          edgeMods.find((m) => m.i === i) ?? { i, curve: 0, angle: 0 };
-        const bumpEdge = (field: "curve" | "angle", delta: number) => {
-          if (!selEdges.length) return;
-          setEdgeMods((prev) => {
-            const next = [...prev];
-            const targets = new Set(selEdges);
-            if (mirrorEdges) {
-              // Mirror onto the opposite parallel edge so boxes stay square.
-              for (const i of selEdges) {
-                const e = edges[i];
-                if (!e) continue;
-                edges.forEach((o: (typeof edges)[number], j: number) => {
-                  if (j === i) return;
-                  if (Math.abs(o.dir.dot(e.dir)) > 0.99 && o.mid.distanceTo(e.mid) > 0.2)
-                    targets.add(j);
-                });
-              }
-            }
-            for (const i of targets) {
-              const at = next.findIndex((m) => m.i === i);
-              const base = at >= 0 ? next[at]! : { i, curve: 0, angle: 0 };
-              const upd = { ...base, [field]: +(base[field] + delta).toFixed(4) };
-              if (at >= 0) next[at] = upd;
-              else next.push(upd);
-            }
-            return next;
-          });
-        };
-
-        return (
-          <>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="font-mono text-[10px] uppercase text-muted-foreground">
-                step
-              </span>
-              {[1, 2, 5].map((d) => (
-                <Chip key={d} active={digit === d} onClick={() => setDigit(d)}>
-                  {d}
-                </Chip>
-              ))}
-              {[0, 1, 2, 3].map((pl) => (
-                <Chip key={pl} active={places === pl} onClick={() => setPlaces(pl)}>
-                  {pl === 0 ? "×1" : `×.${"0".repeat(pl - 1)}1`}
-                </Chip>
-              ))}
-              <span className="font-mono text-[10px] text-accent">±{inc}</span>
-            </div>
-
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <Chip active={lockStretch} onClick={() => setLockStretch((l) => !l)}>
-                {lockStretch ? "uniform" : "per-edge"}
-              </Chip>
-              <Chip active={advanced} onClick={() => setAdvanced((a) => !a)}>
-                Advanced
-              </Chip>
-              <Chip
-                active={confirmPlace}
-                onClick={() => {
-                  setConfirmPlace((c) => !c);
-                  setArmed(false);
-                }}
-              >
-                Confirm {confirmPlace ? "on" : "off"}
-              </Chip>
-            </div>
-
-            {/* Size: big steppers, tap the number to type an exact value. */}
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {(
-                (lockStretch
-                  ? [["size", size, (v: number) => setSize(v)]]
-                  : [
-                      [
-                        "x",
-                        stretch[0] ?? 1,
-                        (v: number) =>
-                          setStretch((s) => [v, s[1], s[2]] as [number, number, number]),
-                      ],
-                      [
-                        "y",
-                        stretch[1] ?? 1,
-                        (v: number) =>
-                          setStretch((s) => [s[0], v, s[2]] as [number, number, number]),
-                      ],
-                      [
-                        "z",
-                        stretch[2] ?? 1,
-                        (v: number) =>
-                          setStretch((s) => [s[0], s[1], v] as [number, number, number]),
-                      ],
-                    ]) as [string, number, (v: number) => void][]
-              ).map(([label, value, set]) => (
-                <div
-                  key={label}
-                  className="flex items-center gap-1 rounded-md border border-grid-line bg-panel/70 p-1"
-                >
-                  <span className="w-7 font-mono text-[10px] uppercase text-muted-foreground">
-                    {label}
-                  </span>
-                  <Btn onClick={() => set(Math.max(0.001, +(value - inc).toFixed(4)))}>
-                    −
-                  </Btn>
-                  <button
-                    type="button"
-                    className="min-w-14 rounded bg-panel px-1.5 py-1 font-mono text-xs text-foreground"
-                    onClick={() => {
-                      const v = window.prompt(`${label} (m)`, String(value));
-                      const n = Number(v);
-                      if (v !== null && Number.isFinite(n) && n > 0) set(n);
-                    }}
-                  >
-                    {dec(value)}
-                  </button>
-                  <Btn onClick={() => set(+(value + inc).toFixed(4))}>+</Btn>
-                </div>
-              ))}
-            </div>
-
-            {/* Edge picker — swipe the strip, tap to select one or more edges. */}
-            <div className="mt-1.5">
-              <div className="mb-1 flex items-center gap-1.5">
-                <span className="font-mono text-[10px] uppercase text-muted-foreground">
-                  edges
-                </span>
-                <Chip active={mirrorEdges} onClick={() => setMirrorEdges((m) => !m)}>
-                  Mirror
-                </Chip>
-                <Chip
-                  active={false}
-                  onClick={() => {
-                    setSelEdges([]);
-                    setEdgeMods([]);
-                  }}
-                >
-                  Reset
-                </Chip>
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  {selEdges.length ? `${selEdges.length} picked` : "tap an edge"}
-                </span>
-              </div>
-              <div className="flex gap-1 overflow-x-auto pb-1">
-                {edges.map((_e: (typeof edges)[number], i: number) => {
-                  const m = modOf(i);
-                  const on = selEdges.includes(i);
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() =>
-                        setSelEdges((prev) =>
-                          prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
-                        )
-                      }
-                      className={`shrink-0 rounded border px-2 py-1 font-mono text-[10px] ${
-                        on
-                          ? "border-accent bg-accent/20 text-accent"
-                          : "border-grid-line bg-panel/70 text-muted-foreground"
-                      }`}
-                    >
-                      e{i + 1}
-                      {m.curve || m.angle ? "•" : ""}
-                    </button>
-                  );
-                })}
-                {!edges.length && (
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    no editable edges on this shape
-                  </span>
-                )}
-              </div>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                <div className="flex items-center gap-1 rounded-md border border-grid-line bg-panel/70 p-1">
-                  <span className="w-9 font-mono text-[10px] uppercase text-muted-foreground">
-                    curve
-                  </span>
-                  <Btn onClick={() => bumpEdge("curve", -inc)}>−</Btn>
-                  <span className="min-w-12 text-center font-mono text-xs">
-                    {dec(selEdges.length ? modOf(selEdges[0]!).curve : 0)}
-                  </span>
-                  <Btn onClick={() => bumpEdge("curve", inc)}>+</Btn>
-                </div>
-                <div className="flex items-center gap-1 rounded-md border border-grid-line bg-panel/70 p-1">
-                  <span className="w-9 font-mono text-[10px] uppercase text-muted-foreground">
-                    angle
-                  </span>
-                  <Btn onClick={() => bumpEdge("angle", -1)}>−</Btn>
-                  <span className="min-w-12 text-center font-mono text-xs">
-                    {(selEdges.length ? modOf(selEdges[0]!).angle : 0).toFixed(1)}°
-                  </span>
-                  <Btn onClick={() => bumpEdge("angle", 1)}>+</Btn>
-                </div>
-                {[15, 30, 45, 90].map((a) => (
-                  <Chip
-                    key={a}
-                    active={false}
-                    onClick={() => {
-                      if (!selEdges.length) return;
-                      bumpEdge("angle", a - modOf(selEdges[0]!).angle);
-                    }}
-                  >
-                    {a}°
-                  </Chip>
-                ))}
-              </div>
-            </div>
-
-            {advanced && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-grid-line pt-1.5">
-                <Chip
-                  active={is2D(kind)}
-                  onClick={() => setKind(is2D(kind) ? "box" : "rect")}
-                >
-                  {is2D(kind) ? "2D" : "3D"}
-                </Chip>
-                {is2D(kind) && (
-                  <div className="flex items-center gap-1">
-                    <span className="font-mono text-[10px] uppercase text-muted-foreground">
-                      extrude
-                    </span>
-                    <Btn onClick={() => setExtrude((v) => Math.max(0, +(v - inc).toFixed(4)))}>
-                      −
-                    </Btn>
-                    <span className="min-w-12 text-center font-mono text-xs">
-                      {dec(extrude)}
-                    </span>
-                    <Btn onClick={() => setExtrude((v) => +(v + inc).toFixed(4))}>+</Btn>
-                  </div>
-                )}
-                <div className="flex items-center gap-1">
-                  <span className="font-mono text-[10px] uppercase text-muted-foreground">
-                    sides
-                  </span>
-                  <Btn onClick={() => setSides((v) => Math.max(3, v - 1))}>−</Btn>
-                  <span className="min-w-8 text-center font-mono text-xs">{sides}</span>
-                  <Btn onClick={() => setSides((v) => Math.min(64, v + 1))}>+</Btn>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="font-mono text-[10px] uppercase text-muted-foreground">
-                    turn
-                  </span>
-                  {(["X", "Y", "Z"] as const).map((ax, i) => (
-                    <Btn
-                      key={ax}
-                      onClick={() =>
-                        updateSelected((o) => {
-                          const r = [...o.rotation] as [number, number, number];
-                          r[i] = r[i]! + THREE.MathUtils.degToRad(rotStep);
-                          return { ...o, rotation: r };
-                        })
-                      }
-                    >
-                      {ax}
-                    </Btn>
-                  ))}
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    {rotStep}°
-                  </span>
-                </div>
-              </div>
-            )}
-          </>
-        );
-      }
 
 
       case "edit":
