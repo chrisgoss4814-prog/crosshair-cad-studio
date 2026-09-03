@@ -2944,7 +2944,7 @@ function CoordChip() {
     return () => cancelAnimationFrame(raf);
   }, []);
   return (
-    <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 -translate-x-1/2 rounded-md border border-grid-line bg-panel/80 px-2 py-0.5 font-mono text-[10px] backdrop-blur-md">
+    <div className="pointer-events-none absolute right-1 top-14 z-30 rounded-md border border-grid-line bg-panel/80 px-2 py-0.5 font-mono text-[10px] backdrop-blur-md">
       <span className="text-axis-x">x {p[0].toFixed(2)}</span>
       <span className="text-axis-y"> · y {p[1].toFixed(2)}</span>
       <span className="text-axis-z"> · z {p[2].toFixed(2)}</span>
