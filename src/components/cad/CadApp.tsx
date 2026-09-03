@@ -1584,7 +1584,7 @@ export function CadApp() {
     const { inc, dec } = shapesCtl();
     return (
       <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-nowrap items-center gap-1.5">
           <span className="font-mono text-[10px] uppercase text-muted-foreground">
             step
           </span>
@@ -1601,7 +1601,7 @@ export function CadApp() {
           <span className="font-mono text-[10px] text-accent">±{inc}</span>
         </div>
         {/* Size: big steppers, tap the number to type an exact value. */}
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <div className="mt-1.5 flex flex-nowrap gap-1.5">
           {(
             (lockStretch
               ? [["size", size, (v: number) => setSize(v)]]
@@ -1661,7 +1661,7 @@ export function CadApp() {
     void edges;
     return (
       <div className="flex flex-col gap-1">
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <div className="mt-1.5 flex flex-nowrap items-center gap-1.5">
           <Chip active={lockStretch} onClick={() => setLockStretch((l) => !l)}>
             {lockStretch ? "uniform" : "per-edge"}
           </Chip>
@@ -1730,7 +1730,7 @@ export function CadApp() {
               </span>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap gap-1.5">
+          <div className="mt-1 flex flex-nowrap gap-1.5">
             <div className="flex items-center gap-1 rounded-md border border-grid-line bg-panel/70 p-1">
               <span className="w-9 font-mono text-[10px] uppercase text-muted-foreground">
                 curve
@@ -1766,7 +1766,7 @@ export function CadApp() {
           </div>
         </div>
         {advanced && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-grid-line pt-1.5">
+          <div className="mt-1.5 flex flex-nowrap items-center gap-1.5 border-t border-grid-line pt-1.5">
             <Chip
               active={is2D(kind)}
               onClick={() => setKind(is2D(kind) ? "box" : "rect")}
