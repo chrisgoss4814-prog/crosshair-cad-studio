@@ -237,7 +237,7 @@ export function applyEdgeMods(
 
   geo.computeBoundingBox();
   const size = geo.boundingBox!.getSize(new THREE.Vector3());
-  const reach = Math.max(0.25, Math.max(size.x, size.y, size.z) * 0.75);
+  const edgeTolerance = Math.max(1e-5, Math.max(size.x, size.y, size.z) * 1e-4);
 
   const pos = geo.getAttribute("position") as THREE.BufferAttribute;
 
@@ -273,8 +273,13 @@ export function applyEdgeMods(
       const along = rel.dot(e.dir);
       perp.copy(rel).addScaledVector(e.dir, -along);
       const d = perp.length();
-      const w = smooth(1 - d / reach);
-      if (w <= 0) continue;
+      // A curve belongs to the selected edge only. Previously a broad
+      // distance falloff pulled vertices from neighboring edges and made
+      // those edges bow as collateral damage. Restrict deformation to the
+      // selected edge's own span; shared corner vertices still move, and the
+      // straightening pass below adjusts every connected edge's length/angle.
+      const onEdge = d <= edgeTolerance && (e.loop || Math.abs(along) <= half + edgeTolerance);
+      if (!onEdge) continue;
       // Along the edge: strongest at the middle, but the ends still take a
       // uniform share, so the corners travel outward together and the faces
       // they belong to grow/shrink instead of pinching.
@@ -282,8 +287,8 @@ export function applyEdgeMods(
       const bow = Math.max(0, 1 - t * t);
       const wAlong = e.loop ? 1 : END_SHARE + (1 - END_SHARE) * bow;
       disp.set(0, 0, 0);
-      if (m.curve) disp.addScaledVector(e.out, m.curve * w * wAlong);
-      if (tan) disp.addScaledVector(e.out, tan * t * half * w);
+      if (m.curve) disp.addScaledVector(e.out, m.curve * wAlong);
+      if (tan) disp.addScaledVector(e.out, tan * t * half);
       pos.setXYZ(i, v.x + disp.x, v.y + disp.y, v.z + disp.z);
     }
   }
